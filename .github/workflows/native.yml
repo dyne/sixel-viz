@@ -29,7 +29,7 @@ jobs:
           apt-get update &&
           apt-get install -y --no-install-recommends build-essential ca-certificates ccache
           cmake git libasound2-dev libavcodec-dev libavformat-dev libavutil-dev
-          libgtk-3-dev libswscale-dev ninja-build pkgconf python3 uuid-dev
+          libswscale-dev ninja-build pkgconf python3 uuid-dev
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

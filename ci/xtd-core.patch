@@ -41,13 +41,15 @@ diff --git a/src/xtd.core.native.linux/CMakeLists.txt b/src/xtd.core.native.linu
      add_reference_directories(${GSOUND_LIBRARY_DIRS})
      add_references(${GSOUND_LIBRARIES})
    else ()
-@@ -28,5 +28,5 @@
-   pkg_check_modules(GTK REQUIRED gtk+-3.0)
-   add_definitions(-D__XTD_USE_GTK__)
+@@ -28,8 +28,3 @@
+-  pkg_check_modules(GTK REQUIRED gtk+-3.0)
+-  add_definitions(-D__XTD_USE_GTK__)
 -  add_include_directories(${GTK_INCLUDE_DIRS})
-+  include_directories(SYSTEM ${GTK_INCLUDE_DIRS})
-   add_reference_directories(${GTK_LIBRARY_DIRS})
-   add_references(${GTK_LIBRARIES})
+-  add_reference_directories(${GTK_LIBRARY_DIRS})
+-  add_references(${GTK_LIBRARIES})
+
+   add_references(dl rt asound uuid pthread)
+ endif ()
 diff --git a/src/xtd.core.native.win32/include/xtd/native/win32/strings.hpp b/src/xtd.core.native.win32/include/xtd/native/win32/strings.hpp
 --- a/src/xtd.core.native.win32/include/xtd/native/win32/strings.hpp
 +++ b/src/xtd.core.native.win32/include/xtd/native/win32/strings.hpp

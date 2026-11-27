@@ -58,25 +58,22 @@ prefix discovery, provide shared libraries or their Windows import libraries
 along with the headers. CMake also searches architecture-specific include and
 library directories beneath each prefix.
 
-For a full Linux build of the pinned xtd SDK, install the GTK 3, ALSA, UUID, and
-wxWidgets 3.2 development libraries. Check out the reference commit in a
-separate directory and run these commands.
+For a Linux xtd SDK build, install the ALSA and UUID development libraries.
+Check out the reference commit in a disposable directory and apply the SDK
+patch from the application directory.
 
 ```sh
+git -C /path/to/xtd apply "$PWD/ci/xtd-core.patch"
 cmake -S /path/to/xtd -B /path/to/xtd-build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/path/to/xtd-sdk \
   -DXTD_BUILD_CPP_STANDARD=20 -DXTD_BUILD_TOOLS=OFF
-cmake --build /path/to/xtd-build --config Release
+cmake --build /path/to/xtd-build --config Release --target xtd.core
 cmake --install /path/to/xtd-build --config Release --prefix /path/to/xtd-sdk
 ```
 
-The isolated Linux verification used a core-only SDK from the same pin. In a
-disposable xtd copy, keep only the first `add_projects` block in
-`src/CMakeLists.txt` and set the generated `xtd_LIBRARIES` list in the root
-`CMakeLists.txt` to `xtd.core`. Set the default `TARGET_REGISTERED` to `OFF` in
-`scripts/cmake/xtd_commands.cmake` if the build must avoid registering desktop
-entries in the user directory. These changes affect packaging only. Build the
-`xtd.core` target and use the same install command to produce the SDK export.
+The pinned xtd Linux core normally requires GTK3 for its graphical debugger
+assertion dialog. The patch removes that dependency and selects xtd's existing
+abort fallback. ALSA remains enabled for xtd's native console support.
 
 Build the workspace's libsixel checkout out of tree. The viewer only needs the
 library and its headers.
@@ -123,8 +120,9 @@ provider observed through `sdk.decode.svg`. The same
 [`ci/native-check.sh`](ci/native-check.sh) recipe can be run on a local host.
 It builds xtd and libsixel from the revisions above into separate SDK
 directories. The [xtd patch](ci/xtd-core.patch) limits the SDK to static core
-libraries, disables system registration and keeps Linux GTK and GSound headers
-private to the SDK build.
+libraries, disables system registration, removes Linux GTK3 discovery and
+keeps optional GSound headers private. It also includes the standard stream
+header required by the Windows core.
 
 | Platform | Toolchain | FFmpeg SDK and SVG provider |
 | --- | --- | --- |
@@ -137,7 +135,7 @@ On Debian 13, install the development packages and run the Linux recipe.
 ```sh
 sudo apt-get update
 sudo apt-get install build-essential ca-certificates cmake git libasound2-dev \
-  libavcodec-dev libavformat-dev libavutil-dev libgtk-3-dev libswscale-dev \
+  libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
   ninja-build pkgconf python3 uuid-dev
 bash ci/native-check.sh linux "$(mktemp -d)"
 ```
