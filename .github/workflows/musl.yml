@@ -19,10 +19,11 @@ jobs:
         id: musl
         with:
           target_arch: x86_64
-          version: v2.7.0
-          sha256: 0668d8be980648ed4286f80cc453b29d8d51ac961c2a36a29d5ceb3b72db70f1
+          version: v2.8.0
+          sha256: f043310b327c85b33aa8b4ed61a5f5ff1dc6e6c11def369979bee22d1e3b45bf
       - name: Try a static musl build of si
         env:
           CC: ${{ steps.musl.outputs.CC }}
           CXX: ${{ steps.musl.outputs.CXX }}
+          SI_BUILD_JOBS: 4
         run: bash ci/musl-check.sh "$RUNNER_TEMP"
