@@ -1,12 +1,26 @@
+#include "media.hpp"
+#include "sixel.hpp"
+
 #include <xtd/console>
 
+#include <cerrno>
+#include <cstdio>
+#include <exception>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <csignal>
+#endif
+
 extern "C" {
-#include <libavformat/avio.h>
+#include <libavutil/log.h>
 }
 
 namespace {
@@ -29,6 +43,33 @@ std::string utf8_path(const std::filesystem::path& path) {
   return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 
+void prepare_stdout() {
+#ifdef _WIN32
+  const int descriptor = _fileno(stdout);
+  if (descriptor < 0 || _setmode(descriptor, _O_BINARY) == -1) {
+    throw std::runtime_error("could not set stdout to binary mode");
+  }
+#else
+  if (std::signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+    throw std::runtime_error("could not configure stdout pipe handling");
+  }
+#endif
+}
+
+std::size_t write_stdout(std::span<const char> data) {
+  while (true) {
+    errno = 0;
+    const auto written = std::fwrite(data.data(), 1, data.size(), stdout);
+    if (!std::ferror(stdout)) return written;
+    const int error = errno;
+    if (error != EINTR) {
+      throw std::system_error(error ? error : EIO, std::generic_category(), "write SIXEL output");
+    }
+    std::clearerr(stdout);
+    if (written > 0) return written;
+  }
+}
+
 int display_file(const std::filesystem::path& path) {
   const auto name = utf8_path(path);
   std::error_code error;
@@ -37,22 +78,25 @@ int display_file(const std::filesystem::path& path) {
     return media_error;
   }
 
-  // Select FFmpeg's file protocol explicitly and pass it the literal path.
-  const auto absolute = std::filesystem::absolute(path, error);
-  if (error) {
-    xtd::console::error << "si: cannot resolve the path '" << name << "'\n";
+  // Report decoder failures with the local filename in the CLI diagnostic.
+  av_log_set_level(AV_LOG_QUIET);
+  try {
+    si::MediaDecoder decoder(path);
+    const auto frame = decoder.next_frame();
+    if (!frame) {
+      xtd::console::error << "si: '" << name << "' has no displayable frame\n";
+      return media_error;
+    }
+    prepare_stdout();
+    const auto width = static_cast<std::size_t>(frame->width);
+    si::encode_sixel({frame->rgb, width, static_cast<std::size_t>(frame->height), width * 3},
+        {write_stdout, [] { return std::fflush(stdout) == 0; }});
+  } catch (const std::exception& failure) {
+    xtd::console::error << "si: '" << name << "': " << failure.what() << '\n';
     return media_error;
   }
-  const auto url = "file:" + utf8_path(absolute);
-  AVIOContext* input = nullptr;
-  if (avio_open2(&input, url.c_str(), AVIO_FLAG_READ, nullptr, nullptr) < 0) {
-    xtd::console::error << "si: cannot read '" << name << "'\n";
-    return media_error;
-  }
-  avio_closep(&input);
 
-  xtd::console::error << "si: opened '" << name << "', but display is unavailable\n";
-  return media_error;
+  return 0;
 }
 
 int run(int argc, const Argument::value_type* const* argv) {

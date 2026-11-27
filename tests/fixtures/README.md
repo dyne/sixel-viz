@@ -1,6 +1,41 @@
-# SDK decode fixtures
+# Media fixtures
 
-Both stills have one 8 × 4 frame. The left four columns are red and the right
-four are blue. The probe checks RGB (255, 0, 0) at (1, 2) and RGB (0, 0, 255)
-at (6, 2), using zero-based coordinates from the top left. The GIF has a
-100 ms frame delay. The SVG has no source timing.
+Pixel coordinates are zero-based from the top left. Expected colors are
+packed 8-bit RGB after compositing against black.
+
+- `two-colors.gif`, `two-colors.svg`, `two-colors.bmp`, `two-colors.tiff` and
+  `two-colors.webp` each contain one 8 × 4 frame with exact red (255, 0, 0) at
+  (1, 2) and blue (0, 0, 255) at (6, 2). The GIF starts at 0 ms and has a
+  100 ms frame delay. The SVG has no source timing.
+- `alpha.png` contains one 8 × 4 frame. At row 2 the RGBA values at x = 1, 3,
+  5 and 7 are (255, 32, 64, 255), (240, 126, 20, 128), (20, 240, 126, 0)
+  and (0, 0, 255, 255). The resulting RGB values are (255, 32, 64),
+  (120, 63, 10), black and blue. The build copies this fixture to a
+  renamed file, a literal percent-pattern filename and numbered siblings.
+- `alpha-edge.svg` contains one 8 × 4 frame. At row 1, x = 1 is clear,
+  x = 3 is half-opacity orange (128, 64, 0), and x = 2 and 6 are the
+  antialiased edges (64, 32, 0). Cairo rounding can differ by 1 per channel.
+- `oriented.jpg` and `mirrored.jpg` contain one 16 × 12 frame each, with red,
+  green, blue and white quadrants in reading order. EXIF orientation 6
+  rotates the display clockwise to 12 × 16, with the four colors in the
+  positions (9, 2), (9, 13), (2, 2), (2, 13). EXIF orientation 5 transposes
+  the display and puts them at (2, 2), (2, 13), (9, 2), (9, 13). Tests allow
+  12 levels per channel for JPEG compression.
+- `limited-yuv.mkv` contains six reordered H.264 frames at 8 fps, with no
+  declared frame count. They are 32 × 16 with 2:1 sample aspect ratio.
+  Each has limited-range BT.709 YUV 4:4:4 red, green, blue and white bars at
+  y = 12 and x = 4, 12, 20 and 28. At (24, 4), frames show red, green,
+  blue, white, black and yellow in display order. PTS values are 0, 125,
+  250, 375, 500 and 625 ms. Each duration is 125 ms. Tests allow 6 levels
+  per channel for YUV quantization and H.264 compression.
+- `covered.mp4` has the same six H.264 frames, an AAC audio stream and a
+  separate attached JPEG cover stream. The video has a 90° counterclockwise
+  display matrix, so its raster is 16 × 32, its sample aspect becomes 1:2
+  and every sample (x, y) above moves to (y, 31 − x).
+- `audio-only.wav`, `corrupt.bin` and `secondary-input.ffconcat` exercise
+  the CLI diagnostics for audio alone, an invalid bitstream and a manifest
+  that would need to open a second local file.
+
+Optional fixture tests for PPM, QOI and JPEG XL use the exact two-color raster
+and have a separate `media-optional` CTest label. A missing FFmpeg demuxer
+or decoder skips only its corresponding optional case.

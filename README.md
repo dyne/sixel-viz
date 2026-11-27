@@ -4,6 +4,7 @@
 
 `si --help` prints usage. `si [--] FILE` takes one local file. Use `--` before
 a filename that starts with a hyphen. Quote filenames containing spaces.
+A still writes one complete SIXEL picture to stdout, including when redirected.
 Usage errors exit 2. Media and output errors exit 1 and write diagnostics to
 stderr. Exit 130 is reserved for interrupted playback.
 
@@ -74,8 +75,8 @@ cmake --install build --config Release --prefix stage
 ```
 
 For a custom runtime library location, make the SDK libraries visible to the
-system loader when launching the installed executable. For an isolated Linux
-setup, set `LD_LIBRARY_PATH` for the command. On Windows, add the SDK DLL
+system loader when launching the installed executable or running install tests.
+For an isolated Linux setup, set `LD_LIBRARY_PATH` for the command. On Windows, add the SDK DLL
 directories to `PATH` or place the DLLs beside `si.exe`.
 
 `ctest --test-dir build -C Release -V -R '^sdk\.'` prints the FFmpeg build
