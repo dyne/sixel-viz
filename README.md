@@ -187,3 +187,22 @@ $work = 'C:\path\to\si-native.XXXXXX'
 $env:PATH = "$work\libsixel-sdk\bin;C:\msys64\ucrt64\bin;$env:PATH"
 & "$work\stage\bin\si.exe" 'C:\path\to\photo.png'
 ```
+
+## Static Linux build
+
+The [static Linux workflow](.github/workflows/musl.yml) pins the x86-64 Dyne
+musl SDK v2.11.0 and uses its bundled FFmpeg 9.1 and librsvg. The
+[`ci/musl-check.sh`](ci/musl-check.sh) recipe applies the
+[musl stack trace patch](ci/xtd-musl.patch) after the xtd core patch, builds
+xtd and libsixel, then tests and installs `si`. It checks for an ELF interpreter
+and dynamic dependencies and runs the installed media test.
+
+To run it locally on Linux, use CMake 3.22 or later, Ninja, make, pkg-config,
+Python, Git and binutils. Export `CC` and `CXX` as absolute paths to the
+Dyne SDK's musl compilers, then run:
+
+```sh
+bash ci/musl-check.sh "$(mktemp -d)"
+```
+
+The printed work directory contains the installed executable at `stage/bin/si`.
