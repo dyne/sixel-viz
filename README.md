@@ -124,10 +124,11 @@ probe exercises `gif/gif` and `svg_pipe/librsvg` through the linked libraries.
 
 ## Native build and installed media check
 
-The [native workflow](.github/workflows/native.yml) uses the following
-toolchains. Each job records the compiler, CMake, SDK versions and the SVG
-provider observed through `sdk.decode.svg`. The same
-[`ci/native-check.sh`](ci/native-check.sh) recipe can be run on a local host.
+The [pull request workflow](.github/workflows/native.yml) runs the full test
+suite and installed-media checks on macOS. The local
+[`ci/native-check.sh`](ci/native-check.sh) recipe supports the toolchains below.
+It records the compiler, CMake, SDK versions and the SVG provider observed
+through `sdk.decode.svg`.
 It builds xtd and libsixel from the revisions above into separate SDK
 directories. The [xtd patch](ci/xtd-core.patch) limits the SDK to static core
 libraries, disables system registration, removes Linux GTK3 discovery and
@@ -237,8 +238,9 @@ text, cursor and input returned after both EOF and Ctrl+C.
 
 ## Static Linux build
 
-The [static Linux workflow](.github/workflows/musl.yml) pins the x86-64 Dyne
-musl SDK v2.11.0 and uses its bundled FFmpeg 9.1 and librsvg. The
+The [release workflow](.github/workflows/release.yml) pins Dyne musl SDK v2.11.0
+and uses its bundled FFmpeg 9.1 and librsvg for x86-64, AArch64, 32-bit ARM
+hard-float, and RISC-V 64-bit. The
 [`ci/musl-check.sh`](ci/musl-check.sh) recipe applies the
 [musl stack trace patch](ci/xtd-musl.patch) after the xtd core patch, builds
 xtd and libsixel, then tests and installs `si`. It checks for an ELF interpreter
@@ -246,10 +248,20 @@ and dynamic dependencies and runs the installed media test.
 
 To run it locally on Linux, use CMake 3.22 or later, Ninja, make, pkg-config,
 Python, Git and binutils. Export `CC` and `CXX` as absolute paths to the
-Dyne SDK's musl compilers, then run:
+Dyne SDK's musl compilers. Install QEMU user emulation when the compiler targets
+a different architecture, then run:
 
 ```sh
 bash ci/musl-check.sh "$(mktemp -d)"
 ```
 
 The printed work directory contains the installed executable at `stage/bin/si`.
+
+## Releases
+
+The first push to `main` with the release workflow publishes `v0.1.0` after
+all four static Linux builds and their installed-media checks pass. Later
+versions follow conventional commits through the IETF Tools SemVer action.
+The workflow tags the tested commit on `main` and publishes four
+`si-linux-<arch>.tar.gz` archives and `SHA256SUMS.txt`. Each archive contains
+the static `si` executable.
