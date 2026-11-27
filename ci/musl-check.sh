@@ -38,11 +38,12 @@ for library in "${ffmpeg_modules[@]}"; do
   test -r "$ffmpeg_sdk/lib/$library.a"
 done
 
+static_link_flags="-static -L$target/lib"
 toolchain=(
   -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86_64
   "-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX" "-DCMAKE_SYSROOT=$sysroot"
   "-DCMAKE_C_FLAGS=-I$target/include" "-DCMAKE_CXX_FLAGS=-I$target/include"
-  "-DCMAKE_EXE_LINKER_FLAGS=-static -L$target/lib"
+  "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags"
   -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
   -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
 )
@@ -71,7 +72,7 @@ checkout_sdk https://github.com/saitoha/libsixel.git 72ed7d6b4a2252a6245567908c3
 mkdir "$work/libsixel-build"
 (
   cd "$work/libsixel-build"
-  CFLAGS="-O2 -I$target/include" LDFLAGS="-static -L$target/lib" \
+  CFLAGS="-O2 -I$target/include" LDFLAGS="$static_link_flags" \
     "$work/libsixel/configure" --host="$triple" --prefix="$sixel_sdk" --disable-shared --enable-static \
     --disable-img2sixel --disable-sixel2png --disable-python --without-libcurl --without-jpeg --without-png
   make -j "$jobs"
@@ -83,15 +84,19 @@ for module in "${ffmpeg_modules[@]}" libsixel; do
   printf '%s ' "$module"
   pkg-config --static --print-errors --modversion "$module"
 done
+# The LLVM unwinder used by librsvg needs the ELF frame table for C++ exceptions.
 cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--static \
+  "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
   "-DCMAKE_FIND_ROOT_PATH=$xtd_sdk;$ffmpeg_sdk;$sixel_sdk;$target;$sysroot" "-Dxtd_DIR=$xtd_sdk/cmake"
 cmake --build "$work/build" --parallel "$jobs"
-ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
+# The missing-SDK case runs its own CMake compiler check.
+LDFLAGS="$static_link_flags" ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
 ctest --test-dir "$work/build" -C Release -V --no-tests=error -R '^sdk\.decode\.(svg|gif)$'
 cmake --install "$work/build" --prefix "$work/stage"
 program=$work/stage/bin/si
 readelf -W -h -l -d "$program" > "$work/si.elf.txt"
 grep -F 'Advanced Micro Devices X86-64' "$work/si.elf.txt"
+grep -E '^[[:blank:]]+GNU_EH_FRAME[[:blank:]]' "$work/si.elf.txt"
 if grep -E 'INTERP|\(NEEDED\)' "$work/si.elf.txt"; then
   printf 'Expected a static x86-64 ELF: %s\n' "$program" >&2
   exit 1
