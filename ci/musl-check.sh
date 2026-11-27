@@ -80,6 +80,10 @@ checkout_sdk() {
 printf 'Building the pinned xtd core with the musl compiler\n'
 checkout_sdk https://github.com/gammasoft71/xtd.git 3ea373359f7a92885d8abd88d397fc23fa1cad7e "$work/xtd"
 git -C "$work/xtd" apply "$source_dir/ci/xtd-core.patch"
+if ((${#svg_options[@]} == 0)); then
+  printf 'Reduced experiment uses xtd without optional ALSA and GSound audio\n'
+  git -C "$work/xtd" apply --unidiff-zero "$source_dir/ci/xtd-musl-reduced.patch"
+fi
 cmake -S "$work/xtd" -B "$work/xtd-build" "${toolchain[@]}" \
   "-DCMAKE_FIND_ROOT_PATH=$target;$sysroot" "-DCMAKE_INSTALL_PREFIX=$work/xtd-sdk" \
   -DXTD_BUILD_CPP_STANDARD=20 -DXTD_BUILD_TOOLS=OFF -DXTD_INSTALL_EXAMPLES=OFF -DXTD_INSTALL_RESOURCES=OFF
