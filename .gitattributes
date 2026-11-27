@@ -1,0 +1,2 @@
+/ci/*.sh text eol=lf
+/ci/*.patch text eol=lf

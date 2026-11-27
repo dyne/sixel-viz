@@ -1,0 +1,50 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -306,5 +306,5 @@
+   "set(${PROJECT_NAME}_INCLUDE_DIRS \"\${CMAKE_CURRENT_LIST_DIR}/../include\")\n"
+   "set(${PROJECT_NAME}_LIBRARIES_DIRS \"\${CMAKE_CURRENT_LIST_DIR}/../lib\")\n"
+-  "set(${PROJECT_NAME}_LIBRARIES ${PROJECT_NAME} xtd.core xtd.drawing xtd.forms xtd.tunit xtd)\n"
++  "set(${PROJECT_NAME}_LIBRARIES xtd.core)\n"
+   "set(${PROJECT_NAME}_FOUND TRUE)\n"
+ )
+diff --git a/scripts/cmake/xtd_commands.cmake b/scripts/cmake/xtd_commands.cmake
+--- a/scripts/cmake/xtd_commands.cmake
++++ b/scripts/cmake/xtd_commands.cmake
+@@ -2220,7 +2220,7 @@
+ ## @brief Contains boolean that specify if application is registered or not on the system.
+ ##  * ON Registered
+ ##  * OFF Not registered
+ ## @see target_registered
+-set(TARGET_REGISTERED ON)
++set(TARGET_REGISTERED OFF)
+
+ # @brief Contains build type (Debug or Release)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -15,3 +15,5 @@
+   xtd.core
+ )
++# The si SDK ships core and its platform libraries only.
++return()
+
+diff --git a/src/xtd.core.native.linux/CMakeLists.txt b/src/xtd.core.native.linux/CMakeLists.txt
+--- a/src/xtd.core.native.linux/CMakeLists.txt
++++ b/src/xtd.core.native.linux/CMakeLists.txt
+@@ -18,7 +18,7 @@
+   pkg_check_modules(GSOUND QUIET gsound)
+   if (GSOUND_LIBRARY_DIRS)
+     add_definitions(-D__XTD_USE_GSOUND__)
+-    add_include_directories(${GSOUND_INCLUDE_DIRS})
++    include_directories(SYSTEM ${GSOUND_INCLUDE_DIRS})
+     add_reference_directories(${GSOUND_LIBRARY_DIRS})
+     add_references(${GSOUND_LIBRARIES})
+   else ()
+@@ -28,5 +28,5 @@
+   pkg_check_modules(GTK REQUIRED gtk+-3.0)
+   add_definitions(-D__XTD_USE_GTK__)
+-  add_include_directories(${GTK_INCLUDE_DIRS})
++  include_directories(SYSTEM ${GTK_INCLUDE_DIRS})
+   add_reference_directories(${GTK_LIBRARY_DIRS})
+   add_references(${GTK_LIBRARIES})

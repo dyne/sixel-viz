@@ -114,3 +114,78 @@ directories to `PATH` or place the DLLs beside `si.exe`.
 configuration, selected demuxers and decoders, and the fixture checks. The
 reference Linux build uses Debian 13 amd64, GCC 14.2 and CMake 3.31.6. The SDK
 probe exercises `gif/gif` and `svg_pipe/librsvg` through the linked libraries.
+
+## Native build and installed media check
+
+The [native workflow](.github/workflows/native.yml) uses the following
+toolchains. Each job records the compiler, CMake, SDK versions and the SVG
+provider observed through `sdk.decode.svg`. The same
+[`ci/native-check.sh`](ci/native-check.sh) recipe can be run on a local host.
+It builds xtd and libsixel from the revisions above into separate SDK
+directories. The [xtd patch](ci/xtd-core.patch) limits the SDK to static core
+libraries, disables system registration and keeps Linux GTK and GSound headers
+private to the SDK build.
+
+| Platform | Toolchain | FFmpeg SDK and SVG provider |
+| --- | --- | --- |
+| Debian 13 x64 | GCC 14, Ninja | Debian shared `libav*` and `libswscale-dev` packages, with librsvg |
+| macOS 15 arm64 | Apple Clang, Ninja | Upstream FFmpeg 7.1.5 shared build with Homebrew librsvg and JPEG XL |
+| Windows x64 | MSYS2 UCRT64 GCC, Ninja | MSYS2 UCRT64 shared FFmpeg package with librsvg |
+
+On Debian 13, install the development packages and run the Linux recipe.
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential ca-certificates cmake git libasound2-dev \
+  libavcodec-dev libavformat-dev libavutil-dev libgtk-3-dev libswscale-dev \
+  ninja-build pkgconf python3 uuid-dev
+bash ci/native-check.sh linux "$(mktemp -d)"
+```
+
+On Apple silicon, use the Xcode command-line tools, CMake and Python 3.9 or
+later. The recipe downloads and checksums the [official FFmpeg source
+archive](https://ffmpeg.org/download.html#releases) and configures shared
+decoding libraries with `--enable-librsvg`.
+
+```sh
+brew install cmake jpeg-xl librsvg ninja pkgconf python
+bash ci/native-check.sh macos "$(mktemp -d)"
+```
+
+On Windows, use an [MSYS2 UCRT64 shell](https://www.msys2.org/docs/environments/)
+and update the package database and installed packages with `pacman -Syu`.
+Reopen the UCRT64 shell and repeat the update if prompted. The [UCRT64 FFmpeg
+package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-ffmpeg)
+supplies headers, import libraries, and DLLs. Keep all SDKs and the application
+on the same UCRT64 toolchain.
+
+```sh
+pacman -S --needed git make mingw-w64-ucrt-x86_64-{cmake,ffmpeg,gcc,ninja,pkgconf,python}
+bash ci/native-check.sh windows "$(mktemp -d)"
+```
+
+Each recipe configures a fresh Release build, runs the full CTest suite,
+installs into an empty `stage` prefix and launches the installed program in
+a separate working directory. The [installed media test](tests/installed_media.py)
+copies the PNG, SVG, GIF and H.264 fixtures to Unicode filenames, captures
+stdout as bytes and checks complete SIXEL framing, raster sizes and RGB
+samples. The looping GIF fixture must emit exactly three pictures and the
+reordered video exactly six, in presentation order.
+
+The recipe prints its work directory. For subsequent launches, use that
+directory in place of `WORK`.
+
+- On Linux, the Debian FFmpeg libraries use the system loader paths. Include
+  `WORK/libsixel-sdk/lib` in `LD_LIBRARY_PATH`.
+- On macOS, keep the FFmpeg and libsixel SDK prefixes at their installed paths
+  and keep the Homebrew librsvg and JPEG XL libraries installed. The recipe
+  sets `DYLD_LIBRARY_PATH` to `WORK/ffmpeg-sdk/lib:WORK/libsixel-sdk/lib`.
+- On Windows, prepend `WORK/libsixel-sdk/bin` and the MSYS2 `ucrt64/bin`
+  directory to `PATH` for libsixel, FFmpeg and their dependent DLLs. From
+  PowerShell, call `si.exe` explicitly because `si` is an alias.
+
+```powershell
+$work = 'C:\path\to\si-native.XXXXXX'
+$env:PATH = "$work\libsixel-sdk\bin;C:\msys64\ucrt64\bin;$env:PATH"
+& "$work\stage\bin\si.exe" 'C:\path\to\photo.png'
+```

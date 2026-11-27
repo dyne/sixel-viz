@@ -1,0 +1,67 @@
+name: Native build and install
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.platform }} installed media
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-24.04
+            container: debian:13
+          - platform: macos
+            runner: macos-15
+          - platform: windows
+            runner: windows-2022
+    steps:
+      - name: Install Debian build tools and SDKs
+        if: matrix.platform == 'linux'
+        run: >-
+          apt-get update &&
+          apt-get install -y --no-install-recommends build-essential ca-certificates ccache
+          cmake git libasound2-dev libavcodec-dev libavformat-dev libavutil-dev
+          libgtk-3-dev libswscale-dev ninja-build pkgconf python3 uuid-dev
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install macOS build tools and SVG provider
+        if: matrix.platform == 'macos'
+        run: brew install jpeg-xl librsvg ninja pkgconf
+
+      - name: Install Windows UCRT64 compiler and SDKs
+        if: matrix.platform == 'windows'
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git make
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Build, test and run the installed viewer on Linux or macOS
+        if: matrix.platform != 'windows'
+        shell: bash
+        env:
+          SI_NATIVE_PLATFORM: ${{ matrix.platform }}
+        run: bash ci/native-check.sh "$SI_NATIVE_PLATFORM" "$RUNNER_TEMP"
+
+      - name: Build, test and run the installed viewer on Windows
+        if: matrix.platform == 'windows'
+        shell: msys2 {0}
+        run: bash ci/native-check.sh windows "$RUNNER_TEMP"
