@@ -1,0 +1,65 @@
+diff --git a/src/xtd.core.native.linux/CMakeLists.txt b/src/xtd.core.native.linux/CMakeLists.txt
+--- a/src/xtd.core.native.linux/CMakeLists.txt
++++ b/src/xtd.core.native.linux/CMakeLists.txt
+@@ -15,4 +15,9 @@
+   find_package(PkgConfig REQUIRED)
+
++  pkg_check_modules(EXECINFO REQUIRED execinfo)
++  include_directories(SYSTEM ${EXECINFO_INCLUDE_DIRS})
++  add_reference_directories(${EXECINFO_LIBRARY_DIRS})
++  add_references(${EXECINFO_LIBRARIES})
++
+   add_definitions(-D__XTD_USE_ASOUND__)
+   pkg_check_modules(GSOUND QUIET gsound)
+diff --git a/src/xtd.core.native.linux/src/xtd/native/linux/stack_trace.cpp b/src/xtd.core.native.linux/src/xtd/native/linux/stack_trace.cpp
+--- a/src/xtd.core.native.linux/src/xtd/native/linux/stack_trace.cpp
++++ b/src/xtd.core.native.linux/src/xtd/native/linux/stack_trace.cpp
+@@ -47,6 +47,8 @@
+ using namespace xtd::native;
+
+ #include <execinfo.h>
+-#include <dlfcn.h>
+ #include <link.h>
++#include <unistd.h>
++#include <cstdint>
++#include <string_view>
+ #include <cxxabi.h>
+@@ -71,7 +73,24 @@
+   module_info get_module_info(void* trace) {
+-    using link_map_ptr = link_map*;
+-    auto info = Dl_info {};
+-    auto link_map = link_map_ptr {};
+-    if (!dladdr1(trace, &info, reinterpret_cast<void**>(&link_map), RTLD_DL_LINKMAP)) return {"", numeric_limits<size_t>::max()};
+-    return {info.dli_fname, link_map->l_addr};
++    struct load_address {
++      uintptr_t address;
++      uintptr_t bias {};
++    };
++    auto mapping = load_address {reinterpret_cast<uintptr_t>(trace)};
++    auto find_main = [](dl_phdr_info* info, size_t, void* data) -> int {
++      if (info->dlpi_name && *info->dlpi_name && string_view {info->dlpi_name} != "/proc/self/exe") return 0;
++      auto& mapping = *static_cast<load_address*>(data);
++      if (mapping.address < info->dlpi_addr) return 0;
++      const auto relative = mapping.address - info->dlpi_addr;
++      for (size_t index = 0; index < info->dlpi_phnum; ++index) {
++        const auto& header = info->dlpi_phdr[index];
++        if (header.p_type == PT_LOAD && relative >= header.p_vaddr && relative - header.p_vaddr < header.p_memsz) {
++          mapping.bias = info->dlpi_addr;
++          return 1;
++        }
++      }
++      return 0;
++    };
++    if (!dl_iterate_phdr(find_main, &mapping)) return {"", numeric_limits<size_t>::max()};
++    // addr2line runs in another process, where /proc/self/exe would name addr2line itself.
++    return {"/proc/" + to_string(getpid()) + "/exe", mapping.bias};
+   }
+@@ -136,5 +155,7 @@
+ stack_trace::frame_collection stack_trace::get_frames(size_t skip_frames, bool need_file_info) {
+   auto addresses = address_collection {size_t {1024}};
+-  addresses.resize(static_cast<size_t>(backtrace(addresses.data(), static_cast<int>(addresses.size()))));
++  const auto count = backtrace(addresses.data(), static_cast<int>(addresses.size()));
++  if (count <= 0) return {};
++  addresses.resize(static_cast<size_t>(count));
+   if (skip_frames + get_native_offset() > addresses.size() || skip_frames > numeric_limits<size_t>::max() - get_native_offset()) return {};
+   addresses.erase(addresses.begin(), addresses.begin() + skip_frames + get_native_offset() - 1);
