@@ -75,6 +75,16 @@ The pinned xtd Linux core normally requires GTK3 for its graphical debugger
 assertion dialog. The patch removes that dependency and selects xtd's existing
 abort fallback. ALSA remains enabled for xtd's native console support.
 
+For a **static musl** SDK build, also apply [`ci/xtd-musl.patch`](ci/xtd-musl.patch)
+after `ci/xtd-core.patch`. Use the musl SDK's `execinfo` pkg-config module,
+headers and static archive. The patch uses Linux program headers for the
+main executable's load address and retains xtd's existing `addr2line`
+symbolization when that tool and executable symbols are available.
+
+```sh
+git -C /path/to/xtd apply "$PWD/ci/xtd-musl.patch"
+```
+
 Build the workspace's libsixel checkout out of tree. The viewer only needs the
 library and its headers.
 

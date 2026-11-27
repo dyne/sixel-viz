@@ -19,8 +19,8 @@ jobs:
         id: musl
         with:
           target_arch: x86_64
-          version: v2.8.0
-          sha256: f043310b327c85b33aa8b4ed61a5f5ff1dc6e6c11def369979bee22d1e3b45bf
+          version: v2.9.0
+          sha256: 99cafecdd1c07562ecc5213860e06c1d08d1e2dcfba55fffb4cc73450a950596
       - name: Try a static musl build of si
         env:
           CC: ${{ steps.musl.outputs.CC }}
