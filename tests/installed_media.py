@@ -63,10 +63,10 @@ def read_picture(output, offset, size):
     return picture.end(), pixels
 
 
-def verify_file(program, work, fixture, size, frames, tolerance=8):
+def verify_file(command, work, fixture, size, frames, tolerance=8):
     name = "夜空 café 🌌" + fixture.suffix
     shutil.copyfile(fixture, work / name)
-    result = subprocess.run([str(program), name], cwd=work, capture_output=True, timeout=30)
+    result = subprocess.run([*command, name], cwd=work, capture_output=True, timeout=30)
     require(result.returncode == 0 and not result.stderr,
             f"exited {result.returncode}, stderr: {result.stderr!r}")
     offset = 0
@@ -89,8 +89,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--program", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
+    parser.add_argument("--emulator", type=Path)
     args = parser.parse_args()
     program = args.program.resolve(strict=True)
+    command = [str(program)]
+    if args.emulator:
+        command.insert(0, str(args.emulator.resolve(strict=True)))
     root = args.work_root.resolve(strict=True)
     tests = Path(__file__).resolve().parent
     require(not root.is_relative_to(tests.parent), "work root must be outside the source tree")
@@ -113,7 +117,7 @@ def main():
         print(f"Program: {program}\nWorking directory: {work}", flush=True)
         for name, size, frames, tolerance in cases:
             try:
-                verify_file(program, work, tests / "fixtures" / name, size, frames, tolerance)
+                verify_file(command, work, tests / "fixtures" / name, size, frames, tolerance)
             except (OSError, subprocess.TimeoutExpired, ValueError) as failure:
                 print(f"{name}: {failure}")
                 failed += 1

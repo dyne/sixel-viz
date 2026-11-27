@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.select.outputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the last version on main
+        id: history
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_sha=$(git rev-parse refs/remotes/origin/main)
+          if [[ $main_sha != "$GITHUB_SHA" ]]; then
+            printf 'A newer main revision will run the release workflow.\n'
+            exit 0
+          fi
+          previous=$(git tag --merged "$GITHUB_SHA" --sort=-version:refname |
+            awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ && !found { print; found=1 }')
+          if [[ -z $previous ]]; then
+            printf 'bootstrap=v0.1.0\n' >> "$GITHUB_OUTPUT"
+          elif [[ $(git rev-parse "$previous^{commit}") == "$GITHUB_SHA" ]]; then
+            # Retry a tag whose release is still missing. Published releases are immutable here.
+            published=$(gh release list --exclude-drafts --json tagName --jq '.[].tagName')
+            if ! grep -Fxq "$previous" <<< "$published"; then
+              printf 'bootstrap=%s\n' "$previous" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            printf 'previous=%s\n' "$previous" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate the next version
+        id: semver
+        if: steps.history.outputs.previous != ''
+        uses: ietf-tools/semver-action@46feaa27e7375da0e3d602721e9fb9573598b880 # v1.12.0
+        with:
+          token: ${{ github.token }}
+          branch: ${{ github.sha }}
+          fromTag: ${{ steps.history.outputs.previous }}
+          noNewCommitBehavior: silent
+          noVersionBumpBehavior: silent
+
+      - name: Select the release tag
+        id: select
+        shell: bash
+        env:
+          TAG: ${{ steps.history.outputs.bootstrap || steps.semver.outputs.next }}
+        run: |
+          if [[ -n $TAG ]]; then
+            [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            printf 'tag=%s\n' "$TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    name: Static Linux (${{ matrix.arch }})
+    needs: version
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            sdk: x86_64
+            sha256: bf05a4be8edb63b309b388a1a6587d088ac4d0c1203fb4606d8887f50e112e01
+          - arch: aarch64
+            sdk: arm_64
+            sha256: 20fb147f8a93c1194a51d69867adacc2f7d88378f0549b8aafaa52c88e9c8dbb
+          - arch: armhf
+            sdk: arm_hf
+            sha256: 884b663ea1e00271b94b344f0d5beaf64d69a9cd8e82ef66255f2f315f07e1b7
+          - arch: riscv64
+            sdk: riscv_64
+            sha256: 496ab839aa0d7be62faf746c2b4262fb5a1ba3f5663f217b9b7f87f3bbdccbd2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install QEMU user emulators
+        if: matrix.sdk != 'x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - uses: dyne/musl-action@fe1d1871b096824ddb7aa158f68dd63dabdc9586
+        id: musl
+        with:
+          target_arch: ${{ matrix.sdk }}
+          version: v2.11.0
+          sha256: ${{ matrix.sha256 }}
+
+      - name: Build, test, and package the installed static viewer
+        shell: bash
+        env:
+          CC: ${{ steps.musl.outputs.CC }}
+          CXX: ${{ steps.musl.outputs.CXX }}
+          SI_BUILD_JOBS: 4
+          ASSET: si-linux-${{ matrix.arch }}.tar.gz
+        run: bash ci/musl-check.sh "$RUNNER_TEMP" "$RUNNER_TEMP/$ASSET"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/si-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [version, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: release
+          pattern: linux-*
+          merge-multiple: true
+
+      - name: Tag the tested revision and publish all assets
+        shell: bash
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          main_sha=$(gh api "repos/$GH_REPO/branches/main" --jq .commit.sha)
+          if [[ $main_sha != "$GITHUB_SHA" ]]; then
+            printf 'Main advanced while the release was building.\n'
+            exit 0
+          fi
+          assets=(si-linux-{aarch64,armhf,riscv64,x86_64}.tar.gz)
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
+          tag_ref=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$TAG\") | .ref")
+          if [[ -n $tag_ref ]]; then
+            test "$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)" = "$GITHUB_SHA"
+          fi
+          gh release create "$TAG" "${assets[@]}" SHA256SUMS.txt \
+            --target "$GITHUB_SHA" --title "$TAG" --generate-notes

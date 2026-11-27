@@ -2,14 +2,37 @@
 set -euo pipefail
 
 root=${1:?Pass an external work directory}
+asset=${2:-}
 work=$(mktemp -d "$root/si-musl.XXXXXX")
 source_dir=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 jobs=${SI_BUILD_JOBS:-2}
 : "${CC:?Use the dyne/musl-action CC output}"
 : "${CXX:?Use the dyne/musl-action CXX output}"
 triple=$("$CC" -dumpmachine)
-test "$triple" = x86_64-linux-musl
 test "$("$CXX" -dumpmachine)" = "$triple"
+case "$triple" in
+  x86_64-linux-musl) processor=x86_64; machine='Advanced Micro Devices X86-64'; emulator=qemu-x86_64 ;;
+  aarch64-linux-musl) processor=aarch64; machine=AArch64; emulator=qemu-aarch64 ;;
+  arm-linux-musleabihf) processor=arm; machine=ARM; emulator=qemu-arm ;;
+  riscv64-linux-musl) processor=riscv64; machine=RISC-V; emulator=qemu-riscv64 ;;
+  *) printf 'Unsupported musl target: %s\n' "$triple" >&2; exit 2 ;;
+esac
+
+runner=()
+media_args=()
+test_config=()
+host_arch=$(uname -m)
+if [[ $host_arch != "$processor" && ! ( $processor == arm && $host_arch == armv[78]l ) ]]; then
+  emulator_path=$(command -v "$emulator") || {
+    printf 'Install %s to run the cross-built viewer.\n' "$emulator" >&2
+    exit 2
+  }
+  runner=("$emulator_path")
+  media_args=(--emulator "$emulator_path")
+  # Some CTest cases spawn target executables or exercise a native PTY.
+  test_config=(-DBUILD_TESTING=OFF)
+fi
+
 sysroot=$("$CC" -print-sysroot)
 target="$(dirname "$(dirname "$(dirname "$CC")")")/$triple"
 printf 'Work directory %s\nTarget SDK %s\nCompiler sysroot %s\n' "$work" "$target" "$sysroot"
@@ -34,7 +57,7 @@ xtd_sdk=$work/xtd-sdk
 sixel_sdk=$work/libsixel-sdk
 static_link_flags="-static -L$target/lib"
 toolchain=(
-  -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=x86_64
+  -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux "-DCMAKE_SYSTEM_PROCESSOR=$processor"
   "-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX" "-DCMAKE_SYSROOT=$sysroot"
   "-DCMAKE_C_FLAGS=-I$target/include" "-DCMAKE_CXX_FLAGS=-I$target/include"
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags"
@@ -67,7 +90,8 @@ mkdir "$work/libsixel-build"
 (
   cd "$work/libsixel-build"
   CFLAGS="-O2 -I$target/include" LDFLAGS="$static_link_flags" \
-    "$work/libsixel/configure" --host="$triple" --prefix="$sixel_sdk" --disable-shared --enable-static \
+    "$work/libsixel/configure" --build="$(sh "$work/libsixel/config.guess")" --host="$triple" \
+    --prefix="$sixel_sdk" --disable-shared --enable-static \
     --disable-img2sixel --disable-sixel2png --disable-python --without-libcurl --without-jpeg --without-png
   make -j "$jobs"
   make install
@@ -77,21 +101,31 @@ export PKG_CONFIG_LIBDIR="$sixel_sdk/lib/pkgconfig:$target/lib/pkgconfig"
 pkg-config --static --print-errors --modversion libsixel
 # The LLVM unwinder used by librsvg needs the ELF frame table for C++ exceptions.
 cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--static \
+  "${test_config[@]}" \
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
   "-DCMAKE_FIND_ROOT_PATH=$xtd_sdk;$sixel_sdk;$target;$sysroot" "-Dxtd_DIR=$xtd_sdk/cmake"
 cmake --build "$work/build" --parallel "$jobs"
-# The missing-SDK case runs its own CMake compiler check.
-LDFLAGS="$static_link_flags" ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
-ctest --test-dir "$work/build" -C Release -V --no-tests=error -R '^sdk\.decode\.(svg|gif)$'
+if ((${#runner[@]} == 0)); then
+  # The missing-SDK case runs its own CMake compiler check.
+  LDFLAGS="$static_link_flags" ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
+  ctest --test-dir "$work/build" -C Release -V --no-tests=error -R '^sdk\.decode\.(svg|gif)$'
+fi
 cmake --install "$work/build" --prefix "$work/stage"
 program=$work/stage/bin/si
 readelf -W -h -l -d "$program" > "$work/si.elf.txt"
-grep -F 'Advanced Micro Devices X86-64' "$work/si.elf.txt"
-grep -E '^[[:blank:]]+GNU_EH_FRAME[[:blank:]]' "$work/si.elf.txt"
+grep -E "^ *Machine: +$machine$" "$work/si.elf.txt"
+if [[ $processor == arm ]]; then
+  grep -F 'hard-float ABI' "$work/si.elf.txt"
+else
+  grep -E '^[[:blank:]]+GNU_EH_FRAME[[:blank:]]' "$work/si.elf.txt"
+fi
 if grep -E 'INTERP|\(NEEDED\)' "$work/si.elf.txt"; then
-  printf 'Expected a static x86-64 ELF: %s\n' "$program" >&2
+  printf 'Expected a static %s ELF: %s\n' "$processor" "$program" >&2
   exit 1
 fi
 printf 'Static ELF has no interpreter or dynamic library dependencies: %s\n' "$program"
-"$program" --help
-python3 "$source_dir/tests/installed_media.py" --program "$program" --work-root "$work"
+"${runner[@]}" "$program" --help
+python3 "$source_dir/tests/installed_media.py" --program "$program" --work-root "$work" "${media_args[@]}"
+if [[ -n $asset ]]; then
+  tar -C "$work/stage/bin" -czf "$asset" si
+fi
