@@ -58,7 +58,7 @@ unset SI_CELL_SIZE
 uname -sm
 cmake --version
 c++ --version
-git -C "$source_dir" rev-parse HEAD
+git -c safe.directory="$source_dir" -C "$source_dir" rev-parse HEAD
 case "$platform" in
   linux)
     dpkg-query -W cmake g++ librsvg2-2
