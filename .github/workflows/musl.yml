@@ -1,0 +1,28 @@
+name: Experimental static Linux build
+
+on:
+  push:
+    branches: [ci/l5-musl]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dyne/musl-action@fe1d1871b096824ddb7aa158f68dd63dabdc9586
+        id: musl
+        with:
+          target_arch: x86_64
+          version: v2.7.0
+          sha256: 0668d8be980648ed4286f80cc453b29d8d51ac961c2a36a29d5ceb3b72db70f1
+      - name: Try a static musl build of si
+        env:
+          CC: ${{ steps.musl.outputs.CC }}
+          CXX: ${{ steps.musl.outputs.CXX }}
+        run: bash ci/musl-check.sh "$RUNNER_TEMP"
