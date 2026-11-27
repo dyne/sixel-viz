@@ -123,7 +123,8 @@ LC_ALL=C readelf -W -h -l -d "$program" > "$work/si.elf.txt"
 grep -E "^ *Machine: +$machine$" "$work/si.elf.txt"
 if [[ $processor == arm ]]; then
   grep -F 'hard-float ABI' "$work/si.elf.txt"
-  grep -E '^[[:blank:]]+ARM_EXIDX[[:blank:]]' "$work/si.elf.txt"
+  # Older binutils displays the PT_ARM_EXIDX segment as EXIDX.
+  grep -E '^[[:blank:]]+(ARM_)?EXIDX[[:blank:]]' "$work/si.elf.txt"
 else
   grep -E '^[[:blank:]]+GNU_EH_FRAME[[:blank:]]' "$work/si.elf.txt"
 fi
