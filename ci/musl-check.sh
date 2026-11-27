@@ -20,7 +20,7 @@ esac
 
 runner=()
 media_args=()
-test_config=()
+app_options=()
 host_arch=$(uname -m)
 if [[ $host_arch != "$processor" && ! ( $processor == arm && $host_arch == armv[78]l ) ]]; then
   emulator_path=$(command -v "$emulator") || {
@@ -30,11 +30,15 @@ if [[ $host_arch != "$processor" && ! ( $processor == arm && $host_arch == armv[
   runner=("$emulator_path")
   media_args=(--emulator "$emulator_path")
   # Some CTest cases spawn target executables or exercise a native PTY.
-  test_config=(-DBUILD_TESTING=OFF)
+  app_options+=(-DBUILD_TESTING=OFF)
 fi
 
 sysroot=$("$CC" -print-sysroot)
 target="$(dirname "$(dirname "$(dirname "$CC")")")/$triple"
+if [[ $processor == arm ]]; then
+  # The SDK defaults to ARMv5TE. The SIGINT handler needs lock-free atomics.
+  app_options+=("-DCMAKE_CXX_FLAGS=-I$target/include -march=armv7-a -mfpu=vfpv3-d16")
+fi
 printf 'Work directory %s\nTarget SDK %s\nCompiler sysroot %s\n' "$work" "$target" "$sysroot"
 "$CC" --version
 git -C "$source_dir" rev-parse HEAD
@@ -89,6 +93,9 @@ checkout_sdk https://github.com/saitoha/libsixel.git 72ed7d6b4a2252a6245567908c3
 mkdir "$work/libsixel-build"
 (
   cd "$work/libsixel-build"
+  # The SDK's musl returns non-null for malloc(0) and realloc(NULL, 0).
+  # Autoconf otherwise guesses no for these target runtime probes when crossing.
+  ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes \
   CFLAGS="-O2 -I$target/include" LDFLAGS="$static_link_flags" \
     "$work/libsixel/configure" --build="$(sh "$work/libsixel/config.guess")" --host="$triple" \
     --prefix="$sixel_sdk" --disable-shared --enable-static \
@@ -101,7 +108,7 @@ export PKG_CONFIG_LIBDIR="$sixel_sdk/lib/pkgconfig:$target/lib/pkgconfig"
 pkg-config --static --print-errors --modversion libsixel
 # The LLVM unwinder used by librsvg needs the ELF frame table for C++ exceptions.
 cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--static \
-  "${test_config[@]}" \
+  "${app_options[@]}" \
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
   "-DCMAKE_FIND_ROOT_PATH=$xtd_sdk;$sixel_sdk;$target;$sysroot" "-Dxtd_DIR=$xtd_sdk/cmake"
 cmake --build "$work/build" --parallel "$jobs"
@@ -112,10 +119,11 @@ if ((${#runner[@]} == 0)); then
 fi
 cmake --install "$work/build" --prefix "$work/stage"
 program=$work/stage/bin/si
-readelf -W -h -l -d "$program" > "$work/si.elf.txt"
+LC_ALL=C readelf -W -h -l -d "$program" > "$work/si.elf.txt"
 grep -E "^ *Machine: +$machine$" "$work/si.elf.txt"
 if [[ $processor == arm ]]; then
   grep -F 'hard-float ABI' "$work/si.elf.txt"
+  grep -E '^[[:blank:]]+ARM_EXIDX[[:blank:]]' "$work/si.elf.txt"
 else
   grep -E '^[[:blank:]]+GNU_EH_FRAME[[:blank:]]' "$work/si.elf.txt"
 fi
