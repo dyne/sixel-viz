@@ -67,12 +67,66 @@ case "$platform" in
   macos)
     sw_vers
     xcrun --sdk macosx --show-sdk-version
-    brew list --versions librsvg jpeg-xl
+    brew list --versions librsvg jpeg-xl pkgconf
     ;;
   windows)
     pacman -Q "${MINGW_PACKAGE_PREFIX}-gcc" "${MINGW_PACKAGE_PREFIX}-ffmpeg" "${MINGW_PACKAGE_PREFIX}-librsvg"
     ;;
 esac
+
+if [[ $platform == macos ]]; then
+  ffmpeg_prefix=$work/ffmpeg-sdk
+  release=ffmpeg-7.1.5
+  archive=$release.tar.xz
+  (
+    brew_prefix=$(brew --prefix)
+    svg_prefix=$(brew --prefix librsvg)
+    jxl_prefix=$(brew --prefix jpeg-xl)
+    pkg_config="$(brew --prefix pkgconf)/bin/pkg-config"
+    if [[ ! -x $pkg_config ]]; then
+      printf 'Homebrew pkg-config is unavailable at %s\n' "$pkg_config" >&2
+      exit 1
+    fi
+    if [[ ! -r $svg_prefix/include/librsvg-2.0/librsvg/rsvg.h ]]; then
+      printf 'FFmpeg librsvg header is unavailable under %s/include\n' "$svg_prefix" >&2
+      exit 1
+    fi
+    pkg_config_dirs="$svg_prefix/lib/pkgconfig:$jxl_prefix/lib/pkgconfig:$brew_prefix/lib/pkgconfig:$brew_prefix/share/pkgconfig"
+    export PKG_CONFIG_PATH="$pkg_config_dirs${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    printf 'Homebrew pkg-config: %s\n' "$pkg_config"
+    "$pkg_config" --version
+    "$pkg_config" --modversion --print-errors librsvg-2.0 libjxl libjxl_threads
+    "$pkg_config" --cflags --libs --print-errors librsvg-2.0 libjxl libjxl_threads
+
+    cd "$work"
+    curl --fail --location --silent --show-error --output "$archive" \
+      "https://ffmpeg.org/releases/$archive"
+    # The official tarball also matches Debian trixie's FFmpeg source package.
+    printf '%s  %s\n' de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f "$archive" |
+      shasum -a 256 --check
+    tar -xf "$archive"
+    mkdir ffmpeg-build
+    cd ffmpeg-build
+    config_log=ffmpeg-config.log
+    status=0
+    # FFmpeg 7.1.5 includes librsvg-2.0/librsvg/rsvg.h from the parent include directory.
+    "../$release/configure" --prefix="$ffmpeg_prefix" \
+      --pkg-config="$pkg_config" --extra-cflags="-I$svg_prefix/include" --logfile="$config_log" \
+      --disable-autodetect --enable-librsvg --enable-libjxl --enable-zlib \
+      --enable-shared --disable-static --disable-debug --disable-doc --disable-programs \
+      --disable-encoders --disable-muxers --disable-avdevice --disable-avfilter --disable-postproc ||
+      status=$?
+    if ((status != 0)); then
+      if [[ -r $config_log ]]; then
+        printf 'FFmpeg configure log tail (%s/%s)\n' "$PWD" "$config_log" >&2
+        tail -n 120 "$config_log" >&2
+      fi
+      exit "$status"
+    fi
+    make -j "$jobs"
+    make install
+  )
+fi
 
 cmake_args=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
 if command -v ccache >/dev/null; then
@@ -98,31 +152,6 @@ mkdir "$work/libsixel-build"
   make -j "$jobs"
   make install
 )
-
-if [[ $platform == macos ]]; then
-  ffmpeg_prefix=$work/ffmpeg-sdk
-  release=ffmpeg-7.1.5
-  archive=$release.tar.xz
-  (
-    cd "$work"
-    curl --fail --location --silent --show-error --output "$archive" \
-      "https://ffmpeg.org/releases/$archive"
-    # The official tarball also matches Debian trixie's FFmpeg source package.
-    printf '%s  %s\n' de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f "$archive" |
-      shasum -a 256 --check
-    tar -xf "$archive"
-    mkdir ffmpeg-build
-    cd ffmpeg-build
-    pkg_config_dirs="$(brew --prefix librsvg)/lib/pkgconfig:$(brew --prefix jpeg-xl)/lib/pkgconfig"
-    PKG_CONFIG_PATH="$pkg_config_dirs${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
-      "../$release/configure" --prefix="$ffmpeg_prefix" \
-      --disable-autodetect --enable-librsvg --enable-libjxl --enable-zlib \
-      --enable-shared --disable-static --disable-debug --disable-doc --disable-programs \
-      --disable-encoders --disable-muxers --disable-avdevice --disable-avfilter --disable-postproc
-    make -j "$jobs"
-    make install
-  )
-fi
 
 case "$platform" in
   linux) export LD_LIBRARY_PATH="$work/libsixel-sdk/lib" ;;
