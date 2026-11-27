@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# != 2 ]]; then
-  printf 'Usage: bash ci/native-check.sh {linux|macos|windows} WORK_ROOT\n' >&2
+if [[ $# != 2 && $# != 3 ]]; then
+  printf 'Usage: bash ci/native-check.sh {linux|macos|windows} WORK_ROOT [ARCHIVE]\n' >&2
   exit 2
 fi
 platform=$1
 root=$2
+archive_path=${3:-}
 source_dir=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 jobs=${SI_BUILD_JOBS:-2}
 ffmpeg_prefix=
@@ -28,6 +29,11 @@ case "$platform:$(uname -s)" in
     exit 2
     ;;
 esac
+
+if [[ -n $archive_path && $platform == linux ]]; then
+  printf 'Package Linux releases with ci/musl-check.sh.\n' >&2
+  exit 2
+fi
 
 root=$(cd -- "$root" && pwd -P)
 if [[ $root == "$source_dir" || $root == "$source_dir/"* ]]; then
@@ -160,7 +166,12 @@ case "$platform" in
 esac
 
 cd "$source_dir"
+app_args=()
+if [[ -n $archive_path && $platform == macos ]]; then
+  app_args+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,-headerpad_max_install_names")
+fi
 cmake -S . -B "$work/build" "${cmake_args[@]}" \
+  "${app_args[@]}" \
   "-Dxtd_DIR=$(native_path "$work/xtd-sdk/cmake")" \
   "-DFFmpeg_ROOT=${ffmpeg_prefix:+$(native_path "$ffmpeg_prefix")}" \
   "-DLibSixel_ROOT=$(native_path "$work/libsixel-sdk")" -DCMAKE_INSTALL_BINDIR=bin
@@ -170,3 +181,15 @@ ctest --test-dir "$work/build" -C Release -V --no-tests=error -R '^sdk\.(smoke|d
 cmake --install "$work/build" --config Release --prefix "$work/stage"
 python3 tests/installed_media.py --program "$(native_path "$work/stage/bin/$program")" \
   --work-root "$(native_path "$work")"
+
+if [[ -n $archive_path ]]; then
+  if [[ $platform == macos ]]; then
+    runtime_dirs=(--runtime-dir "$ffmpeg_prefix/lib" --runtime-dir "$work/libsixel-sdk/lib"
+      --runtime-dir "$(brew --prefix)/lib")
+  else
+    runtime_dirs=(--runtime-dir "$(native_path "$work/libsixel-sdk/bin")"
+      --runtime-dir "$(native_path "$MINGW_PREFIX/bin")")
+  fi
+  python3 ci/package-native.py "$platform" --program "$(native_path "$work/stage/bin/$program")" \
+    --archive "$(native_path "$archive_path")" "${runtime_dirs[@]}"
+fi

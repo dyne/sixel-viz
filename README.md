@@ -259,9 +259,14 @@ The printed work directory contains the installed executable at `stage/bin/si`.
 
 ## Releases
 
-The first push to `main` with the release workflow publishes `v0.1.0` after
-all four static Linux builds and their installed-media checks pass. Later
-versions follow conventional commits through the IETF Tools SemVer action.
-The workflow tags the tested commit on `main` and publishes four
-`si-linux-<arch>.tar.gz` archives and `SHA256SUMS.txt`. Each archive contains
-the static `si` executable.
+The release workflow publishes `v0.1.0` from `main` after all six builds and
+installed-media checks pass. Later versions follow conventional commits
+through the IETF Tools SemVer action. Each release tags the tested commit and
+publishes `SHA256SUMS.txt` alongside these downloads.
+
+- `si-linux-<arch>.tar.gz` contains the static `si` for x86-64, AArch64,
+  ARM hard-float, or RISC-V 64-bit.
+- `si-macos-arm64.tar.gz` contains `si` and its runtime libraries for Apple silicon.
+  Keep the `lib` directory beside the executable.
+- `si-windows-x86_64.zip` contains `si.exe` and its runtime DLLs. Extract the
+  archive and keep the DLLs beside `si.exe`.
