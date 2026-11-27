@@ -75,6 +75,16 @@ The pinned xtd Linux core normally requires GTK3 for its graphical debugger
 assertion dialog. The patch removes that dependency and selects xtd's existing
 abort fallback. ALSA remains enabled for xtd's native console support.
 
+For a **static musl** SDK build, also apply [`ci/xtd-musl.patch`](ci/xtd-musl.patch)
+after `ci/xtd-core.patch`. Use the musl SDK's `execinfo` pkg-config module,
+headers and static archive. The patch uses Linux program headers for the
+main executable's load address and retains xtd's existing `addr2line`
+symbolization when that tool and executable symbols are available.
+
+```sh
+git -C /path/to/xtd apply "$PWD/ci/xtd-musl.patch"
+```
+
 Build the workspace's libsixel checkout out of tree. The viewer only needs the
 library and its headers.
 
@@ -187,6 +197,43 @@ $work = 'C:\path\to\si-native.XXXXXX'
 $env:PATH = "$work\libsixel-sdk\bin;C:\msys64\ucrt64\bin;$env:PATH"
 & "$work\stage\bin\si.exe" 'C:\path\to\photo.png'
 ```
+
+## Visible terminal smoke test
+
+Use an interactive SIXEL-capable terminal and the installed executable with
+the runtime paths above. Set `work` to the directory printed by the recipe.
+Start with a fresh shell at about 80 columns by 24 rows and record the OS,
+terminal version, font, and viewport.
+
+- Linux: [XTerm 398](https://invisible-island.net/xterm/xterm.log.html), built
+  with SIXEL support. Open it in VT340 mode with
+  `xterm -ti vt340 -xrm '*decTerminalID: 340' -xrm '*sixelScrolling: true' -xrm '*resizeGravity: NorthWest'`.
+- macOS: [iTerm2 3.5.14](https://iterm2.com/downloads.html), in a regular
+  interactive shell profile. Check the version in **About iTerm2**.
+- Windows: [Windows Terminal 1.22.10352.0](https://github.com/microsoft/terminal/releases/tag/v1.22.10352.0),
+  using its PowerShell profile. Check **Settings → About** and invoke the
+  installed binary as `& "$work\stage\bin\si.exe" 'C:\path\to\media'`.
+
+On Linux and macOS run `"$work/stage/bin/si" /path/to/media` in the terminal.
+Print a recognizable line such as `SMOKE BEFORE` near the bottom with enough
+room for the picture to appear below it, then do the following.
+
+1. Open a wide PNG or JPEG and `tests/fixtures/two-colors.svg`. Confirm each
+   picture stays inline and the prompt and cursor are usable.
+2. Start `tests/fixtures/resize-motion.gif`. It should play silently once,
+   then restore the original text, prompt and cursor at EOF.
+3. Repeat the GIF and try a local video long enough to resize. Shrink and
+   enlarge the window during playback, including while the GIF holds its
+   first frame. The picture should refit
+   without stale pixels. Press Ctrl+C during the video, check exit 130
+   (`$?` in a POSIX shell, `$LASTEXITCODE` in PowerShell), and type a
+   command at the restored prompt to verify input.
+
+Keep the initial check at the default settings. If a terminal provides
+only its cell grid, `si` estimates pixels from 8×16 cells. Calibrate with
+[`SI_CELL_SIZE`](#terminal-sizing) when needed, then repeat the resize.
+Record the starting, shrunken and enlarged viewports, the fit and whether
+text, cursor and input returned after both EOF and Ctrl+C.
 
 ## Static Linux build
 
