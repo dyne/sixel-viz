@@ -8,6 +8,28 @@ A still writes one complete SIXEL picture to stdout, including when redirected.
 Usage errors exit 2. Media and output errors exit 1 and write diagnostics to
 stderr. Exit 130 is reserved for interrupted playback.
 
+## Terminal sizing
+
+`si` can use the terminal's pixel dimensions or the dimensions of its visible
+cell grid and font. It reserves one prompt row when the terminal has two or
+more rows. For example, 800 × 600 pixels across 30 rows gives an 800 × 580
+usable area. A one-row terminal keeps that row available.
+
+On terminals that report the cell count alone, the fit is approximate. It
+uses 8 × 16 pixels per cell by default. To calibrate it, divide the width and
+height of the terminal's text area in pixels by its column and row counts,
+respectively. Round to whole pixels and set `SI_CELL_SIZE`, for example to
+`10x20`. Use positive decimal integers and a lowercase `x`. An invalid value
+is a usage error. If no dimensions are available, the estimate uses 80 columns
+and 24 rows. When stdout is redirected, `si` writes the still at its native
+display size and sends no terminal query.
+
+Stills shrink only after orientation and pixel-aspect correction. The native
+display width rounds to the nearest whole pixel, with halves rounded up.
+When shrinking, `si` uses the exact display ratio and rounds the scaled
+dimension down, keeping at least one pixel on each axis. Resized pixels use
+the nearest source pixel at each output pixel center.
+
 ## Development SDKs
 
 Use CMake 3.20 or later and a C++20 toolchain. Use SDK headers and libraries for

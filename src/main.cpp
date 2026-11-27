@@ -1,16 +1,22 @@
+#include "fit.hpp"
 #include "media.hpp"
 #include "sixel.hpp"
+#include "terminal.hpp"
 
 #include <xtd/console>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
 #include <fcntl.h>
@@ -70,7 +76,7 @@ std::size_t write_stdout(std::span<const char> data) {
   }
 }
 
-int display_file(const std::filesystem::path& path) {
+int display_file(const std::filesystem::path& path, si::Dimensions cell_size) {
   const auto name = utf8_path(path);
   std::error_code error;
   if (!std::filesystem::is_regular_file(path, error)) {
@@ -81,16 +87,18 @@ int display_file(const std::filesystem::path& path) {
   // Report decoder failures with the local filename in the CLI diagnostic.
   av_log_set_level(AV_LOG_QUIET);
   try {
+    const auto viewport = si::measure_stdout(cell_size);
+    const auto bounds = viewport ? std::optional{viewport->usable_pixels} : std::nullopt;
     si::MediaDecoder decoder(path);
     const auto frame = decoder.next_frame();
     if (!frame) {
       xtd::console::error << "si: '" << name << "' has no displayable frame\n";
       return media_error;
     }
+    std::vector<std::uint8_t> scaled_rgb;
+    const auto picture = si::fit_frame(*frame, bounds, scaled_rgb);
     prepare_stdout();
-    const auto width = static_cast<std::size_t>(frame->width);
-    si::encode_sixel({frame->rgb, width, static_cast<std::size_t>(frame->height), width * 3},
-        {write_stdout, [] { return std::fflush(stdout) == 0; }});
+    si::encode_sixel(picture, {write_stdout, [] { return std::fflush(stdout) == 0; }});
   } catch (const std::exception& failure) {
     xtd::console::error << "si: '" << name << "': " << failure.what() << '\n';
     return media_error;
@@ -110,8 +118,16 @@ int run(int argc, const Argument::value_type* const* argv) {
   if (argc == operand_index + 1) {
     const Argument operand{argv[operand_index]};
     if (!operand.empty() && (options_ended || !operand.starts_with('-'))) {
+      const char* cell_setting = std::getenv("SI_CELL_SIZE");
+      const auto cell_size = cell_setting ? si::parse_cell_size(cell_setting) :
+                                           std::optional{si::default_cell_size};
+      if (!cell_size) {
+        xtd::console::error << "si: SI_CELL_SIZE must be WIDTHxHEIGHT in positive integer pixels\n"
+                            << usage << '\n';
+        return usage_error;
+      }
       try {
-        return display_file(std::filesystem::path{operand});
+        return display_file(std::filesystem::path{operand}, *cell_size);
       } catch (const std::filesystem::filesystem_error&) {
         xtd::console::error << "si: could not represent the input file path\n";
         return media_error;

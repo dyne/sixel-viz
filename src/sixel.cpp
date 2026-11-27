@@ -22,17 +22,8 @@ void check_sixel(SIXELSTATUS status, const char* operation) {
 }
 
 std::size_t checked_row_size(const RgbView& image) {
-  if (!image.width || !image.height || image.width > SIXEL_WIDTH_LIMIT ||
-      image.height > SIXEL_HEIGHT_LIMIT) {
-    throw std::runtime_error("SIXEL image dimensions are out of range");
-  }
-
-  // libsixel performs packed RGB byte-count arithmetic in signed int.
-  constexpr auto max_size = static_cast<std::size_t>(std::numeric_limits<int>::max());
-  if (image.width > max_size / channels / image.height) {
-    throw std::runtime_error("SIXEL image byte count is out of range");
-  }
-  const auto row_size = image.width * channels;
+  const auto byte_count = sixel_rgb_size(image.width, image.height);
+  const auto row_size = byte_count / image.height;
   // Only the visible part of the last row needs to be present.
   if (image.stride < row_size || image.bytes.size() < row_size ||
       image.height - 1 > (image.bytes.size() - row_size) / image.stride) {
@@ -83,6 +74,18 @@ struct Output {
     }
   }
 };
+}
+
+std::size_t sixel_rgb_size(std::size_t width, std::size_t height) {
+  if (!width || !height || width > SIXEL_WIDTH_LIMIT || height > SIXEL_HEIGHT_LIMIT) {
+    throw std::runtime_error("SIXEL image dimensions are out of range");
+  }
+  // libsixel performs packed RGB byte-count arithmetic in signed int.
+  constexpr auto max_size = static_cast<std::size_t>(std::numeric_limits<int>::max());
+  if (width > max_size / channels / height) {
+    throw std::runtime_error("SIXEL image byte count is out of range");
+  }
+  return width * height * channels;
 }
 
 void encode_sixel(RgbView image, const SixelSink& sink) {

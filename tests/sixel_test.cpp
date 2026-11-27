@@ -1,8 +1,11 @@
+#include "fit.hpp"
 #include "sixel.hpp"
+#include "terminal.hpp"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -23,6 +26,8 @@ namespace {
 constexpr int width = 8;
 constexpr int height = 4;
 using Color = std::array<int, 3>;
+constexpr std::array<Color, 2> two_bands{{{255, 0, 0}, {0, 0, 255}}};
+constexpr std::array<Color, 4> four_bands{{{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 255}}};
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
@@ -31,8 +36,10 @@ void require(bool condition, const char* message) {
 // Independent decoder for the 7-bit RGB SIXEL used by these raster tests.
 class RasterReader {
 public:
-  explicit RasterReader(std::string_view bytes, int raster_height = height)
-      : bytes_(bytes), height_(raster_height), pixels_(width * raster_height) {}
+  explicit RasterReader(std::string_view bytes, int raster_height = height, int raster_width = width,
+                        std::span<const Color> bands = two_bands)
+      : bytes_(bytes), width_(raster_width), height_(raster_height), bands_(bands),
+        pixels_(raster_width * raster_height) {}
 
   void check_picture() {
     require(bytes_.starts_with("\033P") && bytes_.ends_with("\033\\"),
@@ -47,7 +54,7 @@ public:
     expect(';');
     require(number() > 0, "invalid raster aspect");
     expect(';');
-    require(number() == width, "unexpected raster width");
+    require(number() == width_, "unexpected raster width");
     expect(';');
     require(number() == height_, "unexpected raster height");
 
@@ -66,18 +73,16 @@ public:
       }
     }
     for (int y = 0; y < height_; ++y) {
-      for (int x = 0; x < width; ++x) {
-        const auto& color = pixels_[y * width + x];
+      for (int x = 0; x < width_; ++x) {
+        const auto& color = pixels_[y * width_ + x];
         require(color.has_value(), "missing raster pixel");
         // The encoder quantizes to 5-bit palette samples, and SIXEL RGB
         // palette components are then specified in percent.
         constexpr int tolerance = 8;
-        if (x < width / 2) {
-          require((*color)[0] >= 255 - tolerance && (*color)[1] == 0 && (*color)[2] == 0,
-                  "expected red on the left");
-        } else {
-          require((*color)[0] == 0 && (*color)[1] == 0 && (*color)[2] >= 255 - tolerance,
-                  "expected blue on the right");
+        const auto& expected = bands_[x * bands_.size() / width_];
+        for (std::size_t channel = 0; channel < color->size(); ++channel) {
+          require(expected[channel] == 0 ? (*color)[channel] == 0 :
+                  std::abs((*color)[channel] - expected[channel]) <= tolerance, "unexpected band color");
         }
       }
     }
@@ -121,21 +126,23 @@ private:
 
   void draw(char sixel, int count) {
     require(sixel >= '?' && sixel <= '~', "unexpected SIXEL data byte");
-    require(count > 0 && count <= width - x_, "SIXEL data extends outside the raster");
+    require(count > 0 && count <= width_ - x_, "SIXEL data extends outside the raster");
     const int bits = sixel - '?';
     for (int row = 0; row < 6; ++row) {
       if ((bits & (1 << row)) == 0) continue;
       require(y_ + row < height_, "SIXEL data extends past the raster height");
       require(palette_[color_].has_value(), "undefined palette entry");
       for (int column = x_; column < x_ + count; ++column) {
-        pixels_[(y_ + row) * width + column] = palette_[color_];
+        pixels_[(y_ + row) * width_ + column] = palette_[color_];
       }
     }
     x_ += count;
   }
 
   std::string_view bytes_;
+  int width_;
   int height_;
+  std::span<const Color> bands_;
   std::array<std::optional<Color>, 256> palette_{};
   std::vector<std::optional<Color>> pixels_;
   int color_ = 0;
@@ -190,6 +197,24 @@ void exercise_small_picture(std::string_view kind) {
   if (kind == "short_write") require(writes > 1, "short writes were not exercised");
   RasterReader{output, static_cast<int>(raster_height)}.check_picture();
   std::cout << kind << " produced a complete 8x" << raster_height << " raster with the expected colors\n";
+}
+
+void fit_terminal() {
+  si::DisplayFrame frame;
+  frame.width = width;
+  frame.height = height;
+  frame.rgb = two_colors(width * 3);
+  const auto viewport = si::resolve_viewport({{1, 2}, {}, {}}, {4, 2});
+  require(viewport.approximate, "expected a cell-only simulated terminal");
+  std::vector<std::uint8_t> scaled_rgb;
+  std::string output;
+  int flushes = 0;
+  si::encode_sixel(si::fit_frame(frame, viewport.usable_pixels, scaled_rgb),
+      {[&](std::span<const char> bytes) { output.append(bytes.data(), bytes.size()); return bytes.size(); },
+       [&] { ++flushes; return true; }});
+  RasterReader{output, 2, 4}.check_picture();
+  require(flushes == 1, "expected one final flush");
+  std::cout << "simulated terminal received one fitted 4x2 raster with all pixels matched\n";
 }
 
 void midframe_failure() {
@@ -282,12 +307,19 @@ int main(int argc, char** argv) {
   if (argc < 2) return 2;
   try {
     const std::string_view kind = argv[1];
-    if (kind == "raster" && argc == 3) {
+    if ((kind == "raster" || kind == "raster_anamorphic") && argc == 3) {
       std::ifstream file(argv[2], std::ios::binary);
       require(file.is_open(), "could not open captured SIXEL output");
       const std::string output{std::istreambuf_iterator<char>{file}, {}};
-      RasterReader{output}.check_picture();
-      std::cout << "one 7-bit SIXEL picture, 8x4, all 32 pixels matched\n";
+      if (kind == "raster_anamorphic") {
+        RasterReader{output, 16, 64, four_bands}.check_picture();
+        std::cout << "one 7-bit SIXEL picture, 64x16, all 1024 pixels matched\n";
+      } else {
+        RasterReader{output}.check_picture();
+        std::cout << "one 7-bit SIXEL picture, 8x4, all 32 pixels matched\n";
+      }
+    } else if (kind == "fit_terminal") {
+      fit_terminal();
     } else if (kind == "padded" || kind == "short_write" || kind == "flush_failure" ||
                kind == "multiple_bands") {
       exercise_small_picture(kind);

@@ -15,6 +15,12 @@ packed 8-bit RGB after compositing against black.
 - `alpha-edge.svg` contains one 8 × 4 frame. At row 1, x = 1 is clear,
   x = 3 is half-opacity orange (128, 64, 0), and x = 2 and 6 are the
   antialiased edges (64, 32, 0). Cairo rounding can differ by 1 per channel.
+- `anamorphic.png` contains a 32 × 16 frame. FFmpeg reports 2:1 sample aspect
+  from its pHYs metadata, giving a 64 × 16 native display. The equal-width
+  vertical bars are red, green, blue and white from left to right.
+- `circle-landscape.svg` and `circle-portrait.svg` contain a centered blue
+  600 × 600 circle against solid red. Their 1920 × 1080 and 1080 × 1920 canvases
+  exercise horizontal and vertical fitting in the live terminal check.
 - `oriented.jpg` and `mirrored.jpg` contain one 16 × 12 frame each, with red,
   green, blue and white quadrants in reading order. EXIF orientation 6
   rotates the display clockwise to 12 × 16, with the four colors in the

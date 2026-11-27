@@ -58,7 +58,7 @@ add_media_error(secondary_input "${fixtures}/secondary-input.ffconcat" "si: .*op
 add_media_error(missing_pattern "${literal}/missing%03d.png" "si: cannot open")
 
 add_executable(sixel_test sixel_test.cpp)
-target_link_libraries(sixel_test PRIVATE si_sixel)
+target_link_libraries(sixel_test PRIVATE si_sixel si_fit si_terminal)
 foreach(case IN ITEMS padded short_write midframe_failure flush_failure bad_buffer multiple_bands)
   add_test(NAME sixel.${case} COMMAND sixel_test ${case})
   set_tests_properties(sixel.${case} PROPERTIES LABELS sixel)
@@ -75,6 +75,33 @@ if(UNIX)
     COMMAND sixel_test closed_pipe "$<TARGET_FILE:si>" "${fixtures}/two-colors.gif")
   set_tests_properties(sixel.closed_pipe PROPERTIES LABELS sixel TIMEOUT 10)
 endif()
+
+add_executable(geometry_test geometry_test.cpp)
+target_link_libraries(geometry_test PRIVATE si_terminal)
+foreach(case IN ITEMS pixel_metrics measured_cells cell_only zero_size one_row cell_size pipe)
+  add_test(NAME geometry.${case} COMMAND geometry_test ${case})
+  set_tests_properties(geometry.${case} PROPERTIES LABELS geometry TIMEOUT 10)
+endforeach()
+
+add_test(NAME geometry.invalid_cell_override COMMAND "${CMAKE_COMMAND}"
+  "-Dcase_name=invalid_cell_override" "-Dprogram=$<TARGET_FILE:si>"
+  "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/invalid-cell-override"
+  -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
+set_tests_properties(geometry.invalid_cell_override PROPERTIES LABELS geometry TIMEOUT 10)
+
+add_executable(fit_test fit_test.cpp)
+target_link_libraries(fit_test PRIVATE si_fit si_media)
+foreach(case IN ITEMS dimensions rounding pixels range)
+  add_test(NAME geometry.fit_${case} COMMAND fit_test ${case})
+  set_tests_properties(geometry.fit_${case} PROPERTIES LABELS geometry TIMEOUT 10)
+endforeach()
+add_test(NAME geometry.fit_rotated COMMAND fit_test rotated "${fixtures}/oriented.jpg")
+add_test(NAME geometry.fit_terminal COMMAND sixel_test fit_terminal)
+add_test(NAME geometry.fit_redirected COMMAND "${CMAKE_COMMAND}"
+  "-Dcase_name=anamorphic" "-Dprogram=$<TARGET_FILE:si>" "-Dverify=$<TARGET_FILE:sixel_test>"
+  "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/fit-redirected" -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
+set_tests_properties(geometry.fit_rotated geometry.fit_terminal geometry.fit_redirected
+  PROPERTIES LABELS geometry TIMEOUT 10)
 
 add_test(NAME sdk.missing
   COMMAND "${CMAKE_COMMAND}"

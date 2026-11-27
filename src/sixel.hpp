@@ -20,6 +20,8 @@ struct SixelSink {
   std::function<bool()> flush;
 };
 
+// Validate the encoder's dimension and signed byte-count limits before allocating.
+std::size_t sixel_rgb_size(std::size_t width, std::size_t height);
 void encode_sixel(RgbView image, const SixelSink& sink);
 
 }
