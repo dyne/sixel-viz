@@ -6,7 +6,16 @@
 a filename that starts with a hyphen. Quote filenames containing spaces.
 A still writes one complete SIXEL picture to stdout, including when redirected.
 Usage errors exit 2. Media and output errors exit 1 and write diagnostics to
-stderr. Exit 130 is reserved for interrupted playback.
+stderr. Ctrl+C interrupts terminal playback and exits with status 130.
+
+Video and animated GIF playback is silent and ends after one pass. On a
+terminal, playback follows the frame timestamps and skips expired
+presentations when output falls behind. Motion uses the terminal's alternate
+screen. Resizing refits the current frame, and playback restores the shell
+screen at EOF or on interruption. Missing or invalid timing uses the
+stream's frame interval limited to 1 ms–1 s, or 40 ms if the rate is unknown.
+Redirected motion writes every frame as a complete SIXEL picture at its native
+display size, without pacing or cursor controls.
 
 ## Terminal sizing
 

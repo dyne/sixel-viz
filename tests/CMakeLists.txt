@@ -103,6 +103,45 @@ add_test(NAME geometry.fit_redirected COMMAND "${CMAKE_COMMAND}"
 set_tests_properties(geometry.fit_rotated geometry.fit_terminal geometry.fit_redirected
   PROPERTIES LABELS geometry TIMEOUT 10)
 
+add_executable(playback_test playback_test.cpp)
+target_link_libraries(playback_test PRIVATE si_playback si_terminal si_sixel si_fit)
+
+function(add_playback_case name fixture)
+  add_test(NAME playback.${name} COMMAND playback_test ${name} "${fixtures}/${fixture}")
+  set_tests_properties(playback.${name} PROPERTIES LABELS playback TIMEOUT 10)
+endfunction()
+
+add_playback_case(variable_rate variable-rate.mkv)
+add_playback_case(reordered limited-yuv.mkv)
+add_playback_case(missing_timestamps untimed.h264)
+add_playback_case(gif once-disposal.gif)
+add_playback_case(slow limited-yuv.mkv)
+add_playback_case(redirected limited-yuv.mkv)
+add_playback_case(resize once-disposal.gif)
+add_test(NAME playback.invalid_timestamps COMMAND playback_test invalid_timestamps)
+add_test(NAME playback.cancel_before_pending COMMAND playback_test cancel_before_pending)
+add_test(NAME playback.redirected_bytes COMMAND "${CMAKE_COMMAND}"
+  "-Dcase_name=playback_gif" "-Dprogram=$<TARGET_FILE:si>" "-Dverify=$<TARGET_FILE:playback_test>"
+  "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/playback-redirected" -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
+set_tests_properties(playback.invalid_timestamps playback.cancel_before_pending playback.redirected_bytes
+  PROPERTIES LABELS playback TIMEOUT 10)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
+  add_executable(terminal_playback_pty terminal_playback_pty.cpp)
+  find_library(PTY_UTIL_LIBRARY util)
+  if(PTY_UTIL_LIBRARY)
+    target_link_libraries(terminal_playback_pty PRIVATE "${PTY_UTIL_LIBRARY}")
+  endif()
+  function(add_pty_case name fixture)
+    add_test(NAME playback.pty_${name}
+      COMMAND terminal_playback_pty ${name} "$<TARGET_FILE:si>" "${fixtures}/${fixture}")
+    set_tests_properties(playback.pty_${name} PROPERTIES LABELS playback TIMEOUT 12)
+  endfunction()
+  add_pty_case(resize resize-motion.gif)
+  add_pty_case(interrupt_hold once-disposal.gif)
+  add_pty_case(interrupt_write resize-motion.gif)
+endif()
+
 add_test(NAME sdk.missing
   COMMAND "${CMAKE_COMMAND}"
     "-Dsource=${PROJECT_SOURCE_DIR}"

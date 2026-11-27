@@ -1,11 +1,14 @@
 #include "fit.hpp"
 #include "media.hpp"
+#include "playback.hpp"
 #include "sixel.hpp"
 #include "terminal.hpp"
+#include "terminal_playback.hpp"
 
 #include <xtd/console>
 
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -32,6 +36,7 @@ extern "C" {
 namespace {
 constexpr int media_error = 1;
 constexpr int usage_error = 2;
+constexpr int interrupted_error = 130;
 constexpr auto usage = "Usage: si [--] FILE\n       si --help";
 
 #ifdef _WIN32
@@ -88,17 +93,41 @@ int display_file(const std::filesystem::path& path, si::Dimensions cell_size) {
   av_log_set_level(AV_LOG_QUIET);
   try {
     const auto viewport = si::measure_stdout(cell_size);
-    const auto bounds = viewport ? std::optional{viewport->usable_pixels} : std::nullopt;
     si::MediaDecoder decoder(path);
-    const auto frame = decoder.next_frame();
-    if (!frame) {
+    auto first = decoder.next_frame();
+    if (!first) {
       xtd::console::error << "si: '" << name << "' has no displayable frame\n";
       return media_error;
     }
-    std::vector<std::uint8_t> scaled_rgb;
-    const auto picture = si::fit_frame(*frame, bounds, scaled_rgb);
+    auto second = decoder.next_frame();
+    if (second && viewport) {
+      si::TerminalPlayback terminal{cell_size};
+      const si::PlaybackClock clock{
+        std::chrono::steady_clock::now,
+        [&](auto until, const si::DisplayFrame& frame) { terminal.hold_until(until, frame); },
+      };
+      si::play_once(std::move(*first), std::move(*second), decoder.frame_rate(),
+          [&] { terminal.check_interrupt(); return decoder.next_frame(); },
+          [&](const si::DisplayFrame& frame) { terminal.present(frame); }, &clock);
+      terminal.finish();
+      return 0;
+    }
+
+    const auto bounds = viewport ? std::optional{viewport->usable_pixels} : std::nullopt;
     prepare_stdout();
-    si::encode_sixel(picture, {write_stdout, [] { return std::fflush(stdout) == 0; }});
+    std::vector<std::uint8_t> scaled_rgb;
+    const si::SixelSink sink{write_stdout, [] { return std::fflush(stdout) == 0; }};
+    const auto present = [&](const si::DisplayFrame& frame) {
+      si::encode_sixel(si::fit_frame(frame, bounds, scaled_rgb), sink);
+    };
+    if (second) {
+      si::play_once(std::move(*first), std::move(*second), decoder.frame_rate(),
+                    [&] { return decoder.next_frame(); }, present, nullptr);
+    } else {
+      present(*first);
+    }
+  } catch (const si::PlaybackInterrupted&) {
+    return interrupted_error;
   } catch (const std::exception& failure) {
     xtd::console::error << "si: '" << name << "': " << failure.what() << '\n';
     return media_error;

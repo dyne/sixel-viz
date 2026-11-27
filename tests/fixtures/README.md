@@ -38,6 +38,24 @@ packed 8-bit RGB after compositing against black.
   separate attached JPEG cover stream. The video has a 90° counterclockwise
   display matrix, so its raster is 16 × 32, its sample aspect becomes 1:2
   and every sample (x, y) above moves to (y, 31 − x).
+- `untimed.h264` contains the same six video frames copied as an elementary
+  H.264 stream. Its frames lack timestamps. Its bitstream declares 8 fps.
+- `variable-rate.mkv` contains four lossless 8 × 4 FFV1 frames filled with
+  red, green, blue and white in that order. The source PTS values are 1000,
+  1120, 1360 and 1400 ms. The stream has no frame durations and the 25 fps
+  guessed rate supplies the final 40 ms interval.
+- `once-disposal.gif` has an 8 × 4 canvas and a GIF extension requesting
+  infinite looping. Its first frame fills the canvas red and remains under
+  subsequent transparent pixels. The second draws a green checkerboard in
+  (2, 0)–(5, 2) and restores the previous canvas before the third. The last
+  draws blue pixels at (6, 1), (7, 1), (5, 2), (7, 2), (4, 3) and (5, 3),
+  and requests background disposal. The frame delays are 2000, 120 and
+  310 ms. The composed reference is tested at every pixel.
+- `resize-motion.gif` contains three 480 × 300 frames with delays of 4000,
+  320 and 300 ms. The first alternates single-pixel red and yellow vertical
+  stripes, the second is solid green and the third is solid blue. The first
+  SIXEL picture exceeds a pseudoterminal's output buffer so playback can be
+  interrupted during an incomplete write.
 - `audio-only.wav`, `corrupt.bin` and `secondary-input.ffconcat` exercise
   the CLI diagnostics for audio alone, an invalid bitstream and a manifest
   that would need to open a second local file.
