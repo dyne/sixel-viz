@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -34,6 +35,11 @@ struct DisplayFrame {
   std::optional<std::int64_t> duration;
 };
 
+struct CaptureTime {
+  std::chrono::sys_seconds instant;
+  std::chrono::year_month_day date;
+};
+
 class MediaDecoder {
 public:
   explicit MediaDecoder(const std::filesystem::path& path);
@@ -44,6 +50,10 @@ public:
   std::optional<DisplayFrame> next_frame();
   std::optional<std::int64_t> declared_frame_count() const;
   AVRational frame_rate() const;
+  // Call after decoding the first frame to include frame-level EXIF tags.
+  std::optional<CaptureTime> capture_time() const;
+  bool is_video() const;
+  DisplayFrame video_preview(DisplayFrame first);
 
 private:
   struct State;

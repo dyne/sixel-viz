@@ -139,15 +139,6 @@ if command -v ccache >/dev/null; then
   cmake_args+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 fi
 
-checkout_sdk https://github.com/gammasoft71/xtd.git 3ea373359f7a92885d8abd88d397fc23fa1cad7e "$work/xtd"
-git -C "$work/xtd" apply "$source_dir/ci/xtd-core.patch"
-cmake -S "$work/xtd" -B "$work/xtd-build" "${cmake_args[@]}" \
-  "-DCMAKE_INSTALL_PREFIX=$(native_path "$work/xtd-sdk")" \
-  -DXTD_BUILD_CPP_STANDARD=20 -DXTD_BUILD_TOOLS=OFF \
-  -DXTD_INSTALL_EXAMPLES=OFF -DXTD_INSTALL_RESOURCES=OFF
-cmake --build "$work/xtd-build" --config Release --target xtd.core --parallel "$jobs"
-cmake --install "$work/xtd-build" --config Release
-
 checkout_sdk https://github.com/saitoha/libsixel.git 72ed7d6b4a2252a6245567908c32c4e8e8c226ea "$work/libsixel"
 mkdir "$work/libsixel-build"
 (
@@ -170,7 +161,6 @@ if [[ -n $archive_path && $platform == macos ]]; then
   cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,-headerpad_max_install_names")
 fi
 cmake -S . -B "$work/build" "${cmake_args[@]}" \
-  "-Dxtd_DIR=$(native_path "$work/xtd-sdk/cmake")" \
   "-DFFmpeg_ROOT=${ffmpeg_prefix:+$(native_path "$ffmpeg_prefix")}" \
   "-DLibSixel_ROOT=$(native_path "$work/libsixel-sdk")" -DCMAKE_INSTALL_BINDIR=bin
 cmake --build "$work/build" --config Release --parallel "$jobs"

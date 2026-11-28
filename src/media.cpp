@@ -1,11 +1,15 @@
 #include "media.hpp"
+#include "exif.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -16,6 +20,7 @@ extern "C" {
 #include <libavutil/error.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/parseutils.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 }
@@ -169,10 +174,50 @@ bool full_range(const AVPixFmtDescriptor& format, AVColorRange range) {
   return std::string_view{format.name}.starts_with("yuvj") || format.nb_components <= 2;
 }
 
+int date_number(std::string_view value) {
+  int number = 0;
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+  return error == std::errc{} && end == value.data() + value.size() ? number : -1;
+}
+
+std::optional<CaptureTime> parse_capture_time(std::string_view value) {
+  using namespace std::chrono;
+  if (value.size() < 10 || (value[4] != ':' && value[4] != '-') || value[7] != value[4]) {
+    return std::nullopt;
+  }
+  const auto year_number = date_number(value.substr(0, 4));
+  const year_month_day date{year{year_number},
+      month{static_cast<unsigned>(date_number(value.substr(5, 2)))},
+      day{static_cast<unsigned>(date_number(value.substr(8, 2)))}};
+  if (year_number < 1 || !date.ok()) return std::nullopt;
+
+  // Normalize EXIF dates for FFmpeg's ISO date parser. Keep the camera's
+  // calendar date for display, even if an offset changes the UTC day.
+  std::string timestamp{value};
+  timestamp[4] = timestamp[7] = '-';
+  if (timestamp.size() == 10) timestamp += " 00:00:00";
+  minutes offset{0};
+  if (timestamp.size() >= 24) {
+    const auto zone_start = timestamp.find_first_of("+-", 19);
+    const auto zone = std::string_view{timestamp}.substr(std::min(zone_start, timestamp.size()));
+    if (zone.size() == 5 || (zone.size() == 6 && zone[3] == ':')) {
+      const auto hours = date_number(zone.substr(1, 2));
+      const auto mins = date_number(zone.substr(zone.size() - 2));
+      if (hours < 0 || hours > 23 || mins < 0 || mins > 59) return std::nullopt;
+      offset = minutes{(hours * 60 + mins) * (zone[0] == '+' ? 1 : -1)};
+      timestamp.replace(zone_start, zone.size(), "Z");
+    }
+  }
+  std::int64_t micros = 0;
+  if (av_parse_time(&micros, timestamp.c_str(), 0) < 0) return std::nullopt;
+  const auto time = floor<seconds>(sys_time<microseconds>{microseconds{micros}}) - offset;
+  return CaptureTime{time, date};
+}
+
 }
 
 struct MediaDecoder::State {
-  explicit State(const std::filesystem::path& path) : file(path) {
+  explicit State(const std::filesystem::path& source) : path(source), file(source) {
     constexpr int buffer_size = 32 * 1024;
     auto* buffer = static_cast<std::uint8_t*>(av_malloc(buffer_size));
     if (!buffer) throw std::bad_alloc{};
@@ -304,6 +349,7 @@ struct MediaDecoder::State {
     }
   }
 
+  std::filesystem::path path;
   LocalFile file;
   std::unique_ptr<AVIOContext, decltype(&free_io)> io{nullptr, free_io};
   Input input;
@@ -333,6 +379,70 @@ std::optional<std::int64_t> MediaDecoder::declared_frame_count() const {
 AVRational MediaDecoder::frame_rate() const {
   auto* input = state_->input.get();
   return av_guess_frame_rate(input, input->streams[state_->stream_index], nullptr);
+}
+
+std::optional<CaptureTime> MediaDecoder::capture_time() const {
+  const auto& state = *state_;
+  const auto* stream = state.input->streams[state.stream_index];
+  const auto tag_time = [&](const char* tag) -> std::optional<CaptureTime> {
+    for (const auto* metadata : {state.frame->metadata, stream->metadata, state.input->metadata}) {
+      if (const auto* entry = av_dict_get(metadata, tag, nullptr, 0)) {
+        if (const auto result = parse_capture_time(entry->value)) return result;
+      }
+    }
+    return std::nullopt;
+  };
+  for (const auto* tag : {"DateTimeOriginal", "ExifIFD/DateTimeOriginal"}) {
+    if (const auto result = tag_time(tag)) return result;
+  }
+  const std::string_view format = state.input->iformat->name;
+  if (format == "png_pipe" || format == "apng" || format == "webp_pipe") {
+    if (const auto date = embedded_exif_date(state.path)) {
+      if (const auto result = parse_capture_time(*date)) return result;
+    }
+  }
+  for (const auto* tag : {"com.apple.quicktime.creationdate", "creation_time",
+                         "DateTimeDigitized", "ExifIFD/DateTimeDigitized"}) {
+    if (const auto result = tag_time(tag)) return result;
+  }
+  return std::nullopt;
+}
+
+bool MediaDecoder::is_video() const {
+  const auto& state = *state_;
+  const auto* stream = state.input->streams[state.stream_index];
+  if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) return false;
+  const std::string_view format = state.input->iformat->name;
+  if (format.ends_with("_pipe") || format == "image2" || format == "image2pipe" ||
+      format == "gif" || format == "apng" || format == "ico") {
+    return false;
+  }
+  // HEIF and AVIF use the same container demuxer as QuickTime video.
+  if (const auto* brand = av_dict_get(state.input->metadata, "major_brand", nullptr, 0)) {
+    const std::string_view value = brand->value;
+    if (value == "avif" || value == "heic" || value == "mif1") return false;
+  }
+  return true;
+}
+
+DisplayFrame MediaDecoder::video_preview(DisplayFrame first) {
+  auto& state = *state_;
+  const auto* stream = state.input->streams[state.stream_index];
+  if (!first.pts || stream->time_base.num <= 0 || stream->time_base.den <= 0) return first;
+  const auto offset = stream->duration > 0 ? stream->duration / 10 :
+      state.input->duration > 0 ? av_rescale_q(state.input->duration / 10,
+          AV_TIME_BASE_Q, stream->time_base) : 0;
+  if (offset <= 0 || *first.pts > std::numeric_limits<std::int64_t>::max() - offset) return first;
+  const auto target = *first.pts + offset;
+  if (av_seek_frame(state.input.get(), state.stream_index, target, AVSEEK_FLAG_BACKWARD) < 0) {
+    return first;
+  }
+  avcodec_flush_buffers(state.codec.get());
+  state.draining = false;
+  while (auto frame = next_frame()) {
+    if (frame->pts && *frame->pts >= target) return std::move(*frame);
+  }
+  return first;
 }
 
 }

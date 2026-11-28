@@ -38,6 +38,7 @@ target="$(dirname "$(dirname "$(dirname "$CC")")")/$triple"
 if [[ $processor == arm ]]; then
   # The SDK defaults to ARMv5TE. The SIGINT handler needs lock-free atomics.
   app_options+=("-DCMAKE_CXX_FLAGS=-I$target/include -march=armv7-a -mfpu=vfpv3-d16")
+  app_options+=(-DSI_USE_GCC_UNWINDER=ON)
 fi
 printf 'Work directory %s\nTarget SDK %s\nCompiler sysroot %s\n' "$work" "$target" "$sysroot"
 "$CC" --version
@@ -46,7 +47,7 @@ git -C "$source_dir" rev-parse HEAD
 unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH LD_LIBRARY_PATH SI_CELL_SIZE
 export PKG_CONFIG_LIBDIR="$target/lib/pkgconfig" PKG_CONFIG_PATH='' PKG_CONFIG_SYSROOT_DIR=''
 ffmpeg_modules=(libavformat libavcodec libavutil libswscale)
-for module in execinfo uuid alsa zlib librsvg-2.0 "${ffmpeg_modules[@]}"; do
+for module in zlib librsvg-2.0 "${ffmpeg_modules[@]}"; do
   version=$(pkg-config --static --print-errors --modversion "$module")
   printf '%s %s\n' "$module" "$version"
 done
@@ -57,7 +58,6 @@ for library in "${ffmpeg_modules[@]}"; do
   fi
 done
 
-xtd_sdk=$work/xtd-sdk
 sixel_sdk=$work/libsixel-sdk
 static_link_flags="-static -L$target/lib"
 toolchain=(
@@ -80,15 +80,6 @@ checkout_sdk() {
   test "$(git -C "$path" rev-parse HEAD)" = "$revision"
 }
 
-checkout_sdk https://github.com/gammasoft71/xtd.git 3ea373359f7a92885d8abd88d397fc23fa1cad7e "$work/xtd"
-git -C "$work/xtd" apply "$source_dir/ci/xtd-core.patch"
-git -C "$work/xtd" apply "$source_dir/ci/xtd-musl.patch"
-cmake -S "$work/xtd" -B "$work/xtd-build" "${toolchain[@]}" \
-  "-DCMAKE_FIND_ROOT_PATH=$target;$sysroot" "-DCMAKE_INSTALL_PREFIX=$xtd_sdk" \
-  -DXTD_BUILD_CPP_STANDARD=20 -DXTD_BUILD_TOOLS=OFF -DXTD_INSTALL_EXAMPLES=OFF -DXTD_INSTALL_RESOURCES=OFF
-cmake --build "$work/xtd-build" --target xtd.core --parallel "$jobs"
-cmake --install "$work/xtd-build"
-
 checkout_sdk https://github.com/saitoha/libsixel.git 72ed7d6b4a2252a6245567908c32c4e8e8c226ea "$work/libsixel"
 mkdir "$work/libsixel-build"
 (
@@ -110,7 +101,7 @@ pkg-config --static --print-errors --modversion libsixel
 cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--static \
   "${app_options[@]}" \
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
-  "-DCMAKE_FIND_ROOT_PATH=$xtd_sdk;$sixel_sdk;$target;$sysroot" "-Dxtd_DIR=$xtd_sdk/cmake"
+  "-DCMAKE_FIND_ROOT_PATH=$sixel_sdk;$target;$sysroot"
 cmake --build "$work/build" --parallel "$jobs"
 if ((${#runner[@]} == 0)); then
   # The missing-SDK case runs its own CMake compiler check.

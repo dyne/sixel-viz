@@ -204,7 +204,11 @@ void check_redirected_bytes(const char* path) {
             "redirected frame differs from the expected SIXEL picture");
     offset += picture.size();
   }
-  require(offset == output.size(), "redirected stream includes extra bytes or a repeated cycle");
+  const auto caption = std::string_view{output}.substr(offset);
+  require(caption.starts_with('\n') && caption.ends_with(" once-disposal.gif\n\n") &&
+          std::count(caption.begin(), caption.end(), '\n') == 3 &&
+          caption.find('\033') == caption.npos,
+          "redirected GIF must end with one caption and a blank line");
 }
 
 void check_resize(const char* path) {

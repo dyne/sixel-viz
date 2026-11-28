@@ -87,7 +87,12 @@ Viewport resolve_viewport(const TerminalMetrics& metrics, Dimensions fallback_ce
     const int height = metrics.pixels.height;
     // Round the reserved row up so the raster stays within the usable area.
     const int prompt = rows > 1 ? height / rows + (height % rows != 0) : 0;
-    return {{metrics.pixels.width, std::max(1, height - prompt)}, false};
+    const Dimensions cells{
+        metrics.cells.width > 0 ? metrics.cells.width :
+            std::max(1, metrics.pixels.width / fallback_cell_size.width),
+        rows > 0 ? rows : std::max(1, height / fallback_cell_size.height),
+    };
+    return {{metrics.pixels.width, std::max(1, height - prompt)}, false, cells, metrics.pixels};
   }
 
   const bool measured_cell_size = positive(metrics.cell_pixels);
@@ -95,7 +100,8 @@ Viewport resolve_viewport(const TerminalMetrics& metrics, Dimensions fallback_ce
   const int columns = metrics.cells.width > 0 ? metrics.cells.width : 80;
   const int rows = metrics.cells.height > 0 ? metrics.cells.height : 24;
   return {{cell_extent(columns, cell_size.width), cell_extent(std::max(1, rows - 1), cell_size.height)},
-          !measured_cell_size || !positive(metrics.cells)};
+          !measured_cell_size || !positive(metrics.cells), {columns, rows},
+          {cell_extent(columns, cell_size.width), cell_extent(rows, cell_size.height)}};
 }
 
 std::optional<Viewport> measure_stdout(Dimensions fallback_cell_size) {

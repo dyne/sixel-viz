@@ -19,6 +19,8 @@ struct TerminalMetrics {
 struct Viewport {
   Dimensions usable_pixels;
   bool approximate;
+  Dimensions cells{};
+  Dimensions pixels{};
 };
 
 inline constexpr Dimensions default_cell_size{8, 16};

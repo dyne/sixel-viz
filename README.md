@@ -1,10 +1,11 @@
 # sixel-viz
 
-`si` is a command-line SIXEL image viewer and silent video player.
+`si` puts photos and video in your terminal using SIXEL. Open a file on its own
+or browse a folder of images and video previews in two columns.
 
-## Install the latest release
+## Install si
 
-On Linux and Apple silicon macOS, run:
+### Linux and Apple silicon macOS
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dyne/sixel-viz/main/install.sh | bash
@@ -14,7 +15,7 @@ This installs `si` in `~/.local/bin` without root access. Add that directory
 to your `PATH` or run `~/.local/bin/si` directly. Set `SI_PREFIX` for another
 install prefix. Rerun the command to update.
 
-On x86-64 Windows, use PowerShell:
+### Windows x86-64
 
 ```powershell
 $installer = Join-Path $env:TEMP 'sixel-viz-install.ps1'
@@ -24,277 +25,172 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $installer
 
 The Windows installer prints the full path to `si.exe` under
 `%LOCALAPPDATA%\sixel-viz`. Run it with `& 'full\path\to\si.exe'`.
+
 Both installers verify the archive's SHA-256 and keep bundled libraries
-with the executable. The [release downloads](https://github.com/dyne/sixel-viz/releases/latest)
-also support manual installation.
+with the executable.
 
-## Usage
+### Install from an archive
 
-`si --help` prints usage. `si [--] FILE` takes one local file. Use `--` before
-a filename that starts with a hyphen. Quote filenames containing spaces.
-A still writes one complete SIXEL picture to stdout, including when redirected.
-Usage errors exit 2. Media and output errors exit 1 and write diagnostics to
-stderr. Ctrl+C interrupts terminal playback and exits with status 130.
+Download an archive for your machine from the [latest release](https://github.com/dyne/sixel-viz/releases/latest).
+Each release includes a `SHA256SUMS.txt` file.
 
-Video and animated GIF playback is silent and ends after one pass. On a
-terminal, playback follows the frame timestamps and skips expired
-presentations when output falls behind. Motion uses the terminal's alternate
-screen. Resizing refits the current frame, and playback restores the shell
-screen at EOF or on interruption. Missing or invalid timing uses the
-stream's frame interval limited to 1 ms–1 s, or 40 ms if the rate is unknown.
-Redirected motion writes every frame as a complete SIXEL picture at its native
-display size, without pacing or cursor controls.
+| Platform | Archive contents |
+| --- | --- |
+| Linux | A static `si` binary for x86-64, AArch64, 32-bit ARM hard-float, or RISC-V 64-bit |
+| macOS | `si` for Apple silicon, with its runtime libraries in `lib/` |
+| Windows | `si.exe` for x86-64, with its runtime DLLs |
 
-## Terminal sizing
+Extract the archive, then run `./si photo.jpg` in a SIXEL-capable terminal.
+On macOS, keep `lib/` beside `si`. On Windows, keep the DLLs beside `si.exe`
+and run `.\si.exe photo.jpg` in PowerShell.
 
-`si` can use the terminal's pixel dimensions or the dimensions of its visible
-cell grid and font. It reserves one prompt row when the terminal has two or
-more rows. For example, 800 × 600 pixels across 30 rows gives an 800 × 580
-usable area. A one-row terminal keeps that row available.
-
-On terminals that report the cell count alone, the fit is approximate. It
-uses 8 × 16 pixels per cell by default. To calibrate it, divide the width and
-height of the terminal's text area in pixels by its column and row counts,
-respectively. Round to whole pixels and set `SI_CELL_SIZE`, for example to
-`10x20`. Use positive decimal integers and a lowercase `x`. An invalid value
-is a usage error. If no dimensions are available, the estimate uses 80 columns
-and 24 rows. When stdout is redirected, `si` writes the still at its native
-display size and sends no terminal query.
-
-Stills shrink only after orientation and pixel-aspect correction. The native
-display width rounds to the nearest whole pixel, with halves rounded up.
-When shrinking, `si` uses the exact display ratio and rounds the scaled
-dimension down, keeping at least one pixel on each axis. Resized pixels use
-the nearest source pixel at each output pixel center.
-
-## Development SDKs
-
-Use CMake 3.20 or later and a C++20 toolchain. Use SDK headers and libraries for
-the same architecture and toolchain as the application.
-
-| SDK | Reference version | Discovery |
-| --- | --- | --- |
-| xtd | `3ea373359f7a92885d8abd88d397fc23fa1cad7e` | `xtd_DIR` contains the installed `xtdConfig.cmake` and `xtd.core` export. |
-| FFmpeg | 7.1.5 (Debian 13 package `7:7.1.5-0+deb13u1`) | `pkg-config` modules `libavformat`, `libavcodec`, `libavutil`, and `libswscale`, or `FFmpeg_ROOT`. |
-| libsixel | 1.8.7-r2, commit `72ed7d6b4a2252a6245567908c32c4e8e8c226ea` | `pkg-config` module `libsixel`, or `LibSixel_ROOT`. |
-
-The FFmpeg libraries must support GIF and SVG decoding. Debian 13's shared
-FFmpeg development packages link to an FFmpeg build with librsvg enabled. For a
-source build, install the librsvg development SDK, configure FFmpeg with
-`--enable-librsvg --enable-shared`, then build and install it. For explicit
-prefix discovery, provide shared libraries or their Windows import libraries
-along with the headers. CMake also searches architecture-specific include and
-library directories beneath each prefix.
-
-For a Linux xtd SDK build, install the ALSA and UUID development libraries.
-Check out the reference commit in a disposable directory and apply the SDK
-patch from the application directory.
+## Use si
 
 ```sh
-git -C /path/to/xtd apply "$PWD/ci/xtd-core.patch"
-cmake -S /path/to/xtd -B /path/to/xtd-build -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX=/path/to/xtd-sdk \
-  -DXTD_BUILD_CPP_STANDARD=20 -DXTD_BUILD_TOOLS=OFF
-cmake --build /path/to/xtd-build --config Release --target xtd.core
-cmake --install /path/to/xtd-build --config Release --prefix /path/to/xtd-sdk
+si photo.jpg
+si clip.mp4
+si photos/
+si 'photos/*.jpg'
+si 'first photo.jpg' 'second photo.jpg'
 ```
 
-The pinned xtd Linux core normally requires GTK3 for its graphical debugger
-assertion dialog. The patch removes that dependency and selects xtd's existing
-abort fallback. ALSA remains enabled for xtd's native console support.
+A single video or animated GIF plays silently once. Press Ctrl+C to stop
+playback and return to the shell. For a folder, `si` shows the media files
+one level deep. Folders, wildcard matches, and lists of files use two columns,
+oldest first. Batch videos show a frame at about 10% of the clip with a play
+symbol. When the timing or seek is unavailable, `si` uses the first frame.
 
-For a **static musl** SDK build, also apply [`ci/xtd-musl.patch`](ci/xtd-musl.patch)
-after `ci/xtd-core.patch`. Use the musl SDK's `execinfo` pkg-config module,
-headers and static archive. The patch uses Linux program headers for the
-main executable's load address and retains xtd's existing `addr2line`
-symbolization when that tool and executable symbols are available.
+A caption shows the capture date, or the file's modification date, followed
+by its size and a path relative to the current directory. Sizes use B, K, M,
+and G in steps of 1024. A blank line follows each row.
 
-```sh
-git -C /path/to/xtd apply "$PWD/ci/xtd-musl.patch"
+```text
+03/02/01 1.5M photos/cat.jpg
+
 ```
 
-Build the workspace's libsixel checkout out of tree. The viewer only needs the
-library and its headers.
+Quote paths with spaces. Quote a pattern if you want `si` to expand it.
+Patterns support `*`, `?`, and bracket sets or ranges. Use `--` before a
+filename that starts with a hyphen. Run `si --help` for usage.
+
+### Terminal size and redirected output
+
+`si` fits images to the terminal and leaves room for the shell prompt. When
+the terminal reports only rows and columns, `si` estimates each cell at
+8 × 16 pixels. Set `SI_CELL_SIZE=10x20` to try a different cell size. The
+setting takes whole pixels in `WIDTHxHEIGHT` form.
+
+During playback, `si` refits the picture when you resize the window and
+restores the shell screen when playback ends. With redirected stdout, a single
+still keeps its native display size and motion writes every frame without
+pacing. Batches use an estimated 80-column grid. Long captions can be shortened
+to fit a terminal column. Redirected captions include the full paths.
+
+Usage errors exit with status 2. Media or output errors exit with status 1 and
+write a message to stderr. Interrupted playback exits with status 130.
+
+## Build the static Linux release
+
+The [release workflow](.github/workflows/release.yml) uses the
+[Dyne musl toolchain](https://github.com/dyne/musl) through
+[dyne/musl-action](https://github.com/dyne/musl-action). The pinned SDK,
+v2.11.0, supplies the compilers, FFmpeg 9.1, and librsvg for all four Linux
+targets. The recipe builds libsixel and links `si` against the FFmpeg libraries
+from the SDK.
+
+To reproduce the Linux build, install CMake 3.22 or newer, Ninja, make,
+pkg-config, Python, Git, and binutils. Export `CC` and `CXX` with the absolute
+paths to the SDK compilers. Install QEMU user emulation if you are building
+for another architecture.
 
 ```sh
-mkdir -p /path/to/libsixel-build
-cd /path/to/libsixel-build
-/path/to/libsixel/configure --prefix=/path/to/libsixel-sdk \
-  --disable-img2sixel --disable-sixel2png --disable-python
-make
-make install
+bash ci/musl-check.sh "$(mktemp -d)"
 ```
 
-## Build, test, and install
+The [script](ci/musl-check.sh) prints its work directory, installs the viewer
+at `stage/bin/si` under that directory, checks that the ELF is statically
+linked, and runs the installed media checks.
 
-Run the commands from the application directory. Omit an explicit media SDK
-prefix if the intended SDK is already available to pkg-config.
+## Build and test locally
+
+The viewer uses standard C++ for console output, FFmpeg for decoding and
+scaling, and libsixel to write SIXEL. Use CMake 3.20 or newer and a C++20
+compiler. Use an FFmpeg build that can decode GIFs and SVGs. The recipes
+build [libsixel 1.8.7-r2](https://github.com/saitoha/libsixel/tree/72ed7d6b4a2252a6245567908c32c4e8e8c226ea).
+
+If pkg-config already finds FFmpeg and libsixel, run these commands from the
+project root. For SDKs installed in custom locations, add
+`-DFFmpeg_ROOT=/path/to/ffmpeg` and `-DLibSixel_ROOT=/path/to/libsixel` to
+the configure command.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -Dxtd_DIR=/path/to/xtd-sdk/cmake \
-  -DFFmpeg_ROOT=/path/to/ffmpeg-sdk \
-  -DLibSixel_ROOT=/path/to/libsixel-sdk
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure --no-tests=error
 cmake --install build --config Release --prefix stage
 ```
 
-For a custom runtime library location, make the SDK libraries visible to the
-system loader when launching the installed executable or running install tests.
-For an isolated Linux setup, set `LD_LIBRARY_PATH` for the command. On Windows, add the SDK DLL
-directories to `PATH` or place the DLLs beside `si.exe`.
+The [native build recipe](ci/native-check.sh) installs into a temporary
+`stage` directory, runs CTest, and checks the installed executable with media
+fixtures. GitHub runs it on Apple silicon macOS for pull requests.
+[Pull request workflow](.github/workflows/native.yml)
 
-`ctest --test-dir build -C Release -V -R '^sdk\.'` prints the FFmpeg build
-configuration, selected demuxers and decoders, and the fixture checks. The
-reference Linux build uses Debian 13 amd64, GCC 14.2 and CMake 3.31.6. The SDK
-probe exercises `gif/gif` and `svg_pipe/librsvg` through the linked libraries.
+<details>
+<summary>Native build commands by platform</summary>
 
-## Native build and installed media check
-
-The [pull request workflow](.github/workflows/native.yml) runs the full test
-suite and installed-media checks on macOS. The local
-[`ci/native-check.sh`](ci/native-check.sh) recipe supports the toolchains below.
-It records the compiler, CMake, SDK versions and the SVG provider observed
-through `sdk.decode.svg`.
-It builds xtd and libsixel from the revisions above into separate SDK
-directories. The [xtd patch](ci/xtd-core.patch) limits the SDK to static core
-libraries, disables system registration, removes Linux GTK3 discovery and
-keeps optional GSound headers private. It also includes the standard stream
-header required by the Windows core.
-
-| Platform | Toolchain | FFmpeg SDK and SVG provider |
-| --- | --- | --- |
-| Debian 13 x64 | GCC 14, Ninja | Debian shared `libav*` and `libswscale-dev` packages, with librsvg |
-| macOS 15 arm64 | Apple Clang, Ninja | Upstream FFmpeg 7.1.5 shared build with Homebrew librsvg and JPEG XL |
-| Windows x64 | MSYS2 UCRT64 GCC, Ninja | MSYS2 UCRT64 shared FFmpeg package with librsvg |
-
-On Debian 13, install the development packages and run the Linux recipe.
+**Debian 13.** The distro FFmpeg packages include SVG support through librsvg.
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential ca-certificates cmake git libasound2-dev \
+sudo apt-get install build-essential ca-certificates cmake git \
   libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
-  ninja-build pkgconf python3 uuid-dev
+  ninja-build pkgconf python3
 bash ci/native-check.sh linux "$(mktemp -d)"
 ```
 
-On Apple silicon, use the Xcode command-line tools, CMake and Python 3.9 or
-later. The recipe downloads and checksums the [official FFmpeg source
-archive](https://ffmpeg.org/download.html#releases) and configures shared
-decoding libraries with `--enable-librsvg`.
+**Apple silicon macOS.** Install the Xcode command-line tools first. The
+recipe builds shared FFmpeg 7.1.5 with Homebrew's librsvg and JPEG XL libraries.
 
 ```sh
 brew install cmake jpeg-xl librsvg ninja pkgconf python
 bash ci/native-check.sh macos "$(mktemp -d)"
 ```
 
-On Windows, use an [MSYS2 UCRT64 shell](https://www.msys2.org/docs/environments/)
-and update the package database and installed packages with `pacman -Syu`.
-Reopen the UCRT64 shell and repeat the update if prompted. The [UCRT64 FFmpeg
-package](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-ffmpeg)
-supplies headers, import libraries, and DLLs. Keep all SDKs and the application
-on the same UCRT64 toolchain.
+**Windows.** Open an MSYS2 UCRT64 shell and update it with `pacman -Syu`.
+The recipe uses the UCRT64 FFmpeg package. [MSYS2 environments](https://www.msys2.org/docs/environments/)
 
 ```sh
 pacman -S --needed git make mingw-w64-ucrt-x86_64-{cmake,ffmpeg,gcc,ninja,pkgconf,python}
 bash ci/native-check.sh windows "$(mktemp -d)"
 ```
 
-Each recipe configures a fresh Release build, runs the full CTest suite,
-installs into an empty `stage` prefix and launches the installed program in
-a separate working directory. The [installed media test](tests/installed_media.py)
-copies the PNG, SVG, GIF and H.264 fixtures to Unicode filenames, captures
-stdout as bytes and checks complete SIXEL framing, raster sizes and RGB
-samples. The looping GIF fixture must emit exactly three pictures and the
-reordered video exactly six, in presentation order.
+To run a native build again from the work directory printed by the recipe,
+include its SDK libraries in the loader path. On Linux, add `libsixel-sdk/lib`
+to `LD_LIBRARY_PATH`. On macOS, add `ffmpeg-sdk/lib` and `libsixel-sdk/lib`
+to `DYLD_LIBRARY_PATH`. On Windows, add `libsixel-sdk/bin` and the MSYS2
+`ucrt64/bin` directory to `PATH`.
 
-The recipe prints its work directory. For subsequent launches, use that
-directory in place of `WORK`.
+</details>
 
-- On Linux, the Debian FFmpeg libraries use the system loader paths. Include
-  `WORK/libsixel-sdk/lib` in `LD_LIBRARY_PATH`.
-- On macOS, keep the FFmpeg and libsixel SDK prefixes at their installed paths
-  and keep the Homebrew librsvg and JPEG XL libraries installed. The recipe
-  sets `DYLD_LIBRARY_PATH` to `WORK/ffmpeg-sdk/lib:WORK/libsixel-sdk/lib`.
-- On Windows, prepend `WORK/libsixel-sdk/bin` and the MSYS2 `ucrt64/bin`
-  directory to `PATH` for libsixel, FFmpeg and their dependent DLLs. From
-  PowerShell, call `si.exe` explicitly because `si` is an alias.
+### Check rendering in a terminal
 
-```powershell
-$work = 'C:\path\to\si-native.XXXXXX'
-$env:PATH = "$work\libsixel-sdk\bin;C:\msys64\ucrt64\bin;$env:PATH"
-& "$work\stage\bin\si.exe" 'C:\path\to\photo.png'
-```
+Try a wide photo, `tests/fixtures/two-colors.svg`, and a folder with several
+images. The output should stay above the prompt. Play
+`tests/fixtures/resize-motion.gif`, resize the window while it plays, and make
+sure the shell is usable when it finishes. Repeat with a video and Ctrl+C.
 
-## Visible terminal smoke test
-
-Use an interactive SIXEL-capable terminal and the installed executable with
-the runtime paths above. Set `work` to the directory printed by the recipe.
-Start with a fresh shell at about 80 columns by 24 rows and record the OS,
-terminal version, font, and viewport.
-
-- Linux: [XTerm 398](https://invisible-island.net/xterm/xterm.log.html), built
-  with SIXEL support. Open it in VT340 mode with
-  `xterm -ti vt340 -xrm '*decTerminalID: 340' -xrm '*sixelScrolling: true' -xrm '*resizeGravity: NorthWest'`.
-- macOS: [iTerm2 3.5.14](https://iterm2.com/downloads.html), in a regular
-  interactive shell profile. Check the version in **About iTerm2**.
-- Windows: [Windows Terminal 1.22.10352.0](https://github.com/microsoft/terminal/releases/tag/v1.22.10352.0),
-  using its PowerShell profile. Check **Settings → About** and invoke the
-  installed binary as `& "$work\stage\bin\si.exe" 'C:\path\to\media'`.
-
-On Linux and macOS run `"$work/stage/bin/si" /path/to/media` in the terminal.
-Print a recognizable line such as `SMOKE BEFORE` near the bottom with enough
-room for the picture to appear below it, then do the following.
-
-1. Open a wide PNG or JPEG and `tests/fixtures/two-colors.svg`. Confirm each
-   picture stays inline and the prompt and cursor are usable.
-2. Start `tests/fixtures/resize-motion.gif`. It should play silently once,
-   then restore the original text, prompt and cursor at EOF.
-3. Repeat the GIF and try a local video long enough to resize. Shrink and
-   enlarge the window during playback, including while the GIF holds its
-   first frame. The picture should refit
-   without stale pixels. Press Ctrl+C during the video, check exit 130
-   (`$?` in a POSIX shell, `$LASTEXITCODE` in PowerShell), and type a
-   command at the restored prompt to verify input.
-
-Keep the initial check at the default settings. If a terminal provides
-only its cell grid, `si` estimates pixels from 8×16 cells. Calibrate with
-[`SI_CELL_SIZE`](#terminal-sizing) when needed, then repeat the resize.
-Record the starting, shrunken and enlarged viewports, the fit and whether
-text, cursor and input returned after both EOF and Ctrl+C.
-
-## Static Linux build
-
-The [release workflow](.github/workflows/release.yml) pins Dyne musl SDK v2.11.0
-and uses its bundled FFmpeg 9.1 and librsvg for x86-64, AArch64, 32-bit ARM
-hard-float, and RISC-V 64-bit. The
-[`ci/musl-check.sh`](ci/musl-check.sh) recipe applies the
-[musl stack trace patch](ci/xtd-musl.patch) after the xtd core patch, builds
-xtd and libsixel, then tests and installs `si`. It checks for an ELF interpreter
-and dynamic dependencies and runs the installed media test.
-
-To run it locally on Linux, use CMake 3.22 or later, Ninja, make, pkg-config,
-Python, Git and binutils. Export `CC` and `CXX` as absolute paths to the
-Dyne SDK's musl compilers. Install QEMU user emulation when the compiler targets
-a different architecture, then run:
+To try SIXEL in XTerm, open it in VT340 mode.
 
 ```sh
-bash ci/musl-check.sh "$(mktemp -d)"
+xterm -ti vt340 -xrm '*decTerminalID: 340' -xrm '*sixelScrolling: true'
 ```
 
-The printed work directory contains the installed executable at `stage/bin/si`.
+On macOS, use a SIXEL-capable iTerm2 profile. On Windows, run `si.exe` from a
+SIXEL-capable Windows Terminal profile.
 
-## Releases
+## How releases are published
 
-The release workflow publishes `v0.1.0` from `main` after all six builds and
-installed-media checks pass. Later versions follow conventional commits
-through the IETF Tools SemVer action. Each release tags the tested commit and
-publishes `SHA256SUMS.txt` alongside these downloads.
-
-- `si-linux-<arch>.tar.gz` contains the static `si` for x86-64, AArch64,
-  ARM hard-float, or RISC-V 64-bit.
-- `si-macos-arm64.tar.gz` contains `si` and its runtime libraries for Apple silicon.
-  Keep the `lib` directory beside the executable.
-- `si-windows-x86_64.zip` contains `si.exe` and its runtime DLLs. Extract the
-  archive and keep the DLLs beside `si.exe`.
+GitHub Actions tags the tested commit on `main` and publishes the archives
+after all six builds and installed-media checks pass. Versioning follows
+conventional commits through the IETF Tools SemVer action.
+[Release workflow](.github/workflows/release.yml)
