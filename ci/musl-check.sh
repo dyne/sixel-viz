@@ -108,6 +108,7 @@ pkg-config --static --print-errors --modversion libsixel
 # The LLVM unwinder used by librsvg needs the ELF frame table for C++ exceptions.
 cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--static \
   "${app_options[@]}" \
+  "-DSI_BUILD_VERSION=${SI_BUILD_VERSION:-}" "-DSI_MUSL_SDK_VERSION=${SI_MUSL_SDK_VERSION:-unknown}" \
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
   "-DCMAKE_FIND_ROOT_PATH=$sixel_sdk;$target;$sysroot"
 cmake --build "$work/build" --parallel "$jobs"

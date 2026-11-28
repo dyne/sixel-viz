@@ -12,6 +12,9 @@ import tempfile
 import zlib
 
 
+BANNER = re.compile(
+    rb"Sixel-Viz (v\d+\.\d+\.\d+) by Jaromil - Copyright \(C\) 2026 Dyne\.org foundation"
+)
 PICTURE = re.compile(rb'\x1bP[0-9;]*q"(\d+);(\d+);(\d+);(\d+)([^\x1b]*)\x1b\\')
 COMMAND = re.compile(rb"#(\d+)(?:;2;(\d+);(\d+);(\d+))?|\$|-|(?:!(\d+))?([?-~])")
 
@@ -81,9 +84,28 @@ def run_si(command, work, *operands):
     env = dict(os.environ, SI_CELL_SIZE="8x16")
     result = subprocess.run([*command, *operands], cwd=work, capture_output=True,
                             timeout=30, env=env)
-    require(result.returncode == 0 and not result.stderr,
+    diagnostics = result.stderr.splitlines()
+    require(result.returncode == 0 and len(diagnostics) == 1 and BANNER.fullmatch(diagnostics[0]),
             f"exited {result.returncode}, stderr: {result.stderr!r}")
     return result.stdout
+
+
+def verify_version(command, work, _fixtures):
+    result = subprocess.run([*command, "--version"], cwd=work, capture_output=True, timeout=30)
+    lines = result.stdout.splitlines()
+    require(result.returncode == 0 and not result.stderr and len(lines) == 4,
+            f"unexpected --version output: {result.stdout!r}, stderr: {result.stderr!r}")
+    banner = BANNER.fullmatch(lines[0])
+    require(banner, f"unexpected build banner: {lines[0]!r}")
+    for line, prefix in zip(lines[1:], (b"Dyne musl SDK: ", b"FFmpeg: ", b"libsixel: ")):
+        require(line.startswith(prefix) and len(line) > len(prefix), f"missing version: {line!r}")
+    expected = os.environ.get("SI_BUILD_VERSION")
+    if expected:
+        require(banner[1].decode() == expected, f"release expected {expected}, got {banner[1]!r}")
+    sdk = os.environ.get("SI_MUSL_SDK_VERSION")
+    if sdk:
+        require(lines[1].decode() == f"Dyne musl SDK: {sdk}", f"expected SDK {sdk}, got {lines[1]!r}")
+    print("Version: " + " | ".join(line.decode() for line in lines))
 
 
 def verify_file(command, work, fixture, size, frames, tolerance=8):
@@ -238,7 +260,7 @@ def main():
             except (OSError, subprocess.TimeoutExpired, ValueError) as failure:
                 print(f"{name}: {failure}")
                 failed += 1
-        extra_checks = (verify_image_metadata, verify_gallery)
+        extra_checks = (verify_version, verify_image_metadata, verify_gallery)
         for verify in extra_checks:
             try:
                 verify(command, work, fixtures)

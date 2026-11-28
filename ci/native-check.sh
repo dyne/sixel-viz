@@ -175,6 +175,7 @@ if [[ -n $archive_path && $platform == macos ]]; then
   cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,-headerpad_max_install_names")
 fi
 cmake -S . -B "$work/build" "${cmake_args[@]}" \
+  "-DSI_BUILD_VERSION=${SI_BUILD_VERSION:-}" \
   "-DFFmpeg_ROOT=${ffmpeg_prefix:+$(native_path "$ffmpeg_prefix")}" \
   "-DLibSixel_ROOT=$(native_path "$work/libsixel-sdk")" -DCMAKE_INSTALL_BINDIR=bin
 cmake --build "$work/build" --config Release --parallel "$jobs"

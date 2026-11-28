@@ -7,6 +7,8 @@
 
 namespace si {
 
+const char* sixel_version();
+
 struct RgbView {
   std::span<const std::uint8_t> bytes;
   std::size_t width;

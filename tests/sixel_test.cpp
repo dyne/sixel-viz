@@ -296,7 +296,8 @@ void closed_pipe(const char* program, const char* fixture) {
   }
   require(WIFEXITED(status) && WEXITSTATUS(status) == 1,
           "closed-pipe failure should exit normally with status 1");
-  require(diagnostic.starts_with("si: ") && diagnostic.find("SIXEL") != std::string::npos,
+  require(diagnostic.starts_with("Sixel-Viz v") && diagnostic.find("\nsi: ") != std::string::npos &&
+          diagnostic.find("SIXEL") != std::string::npos,
           "closed pipe should produce a SIXEL output diagnostic");
   std::cout << "closed pipe exited 1 with diagnostic " << diagnostic;
 }

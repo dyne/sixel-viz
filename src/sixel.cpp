@@ -11,6 +11,9 @@
 #include <sixel.h>
 
 namespace si {
+
+const char* sixel_version() { return LIBSIXEL_VERSION; }
+
 namespace {
 constexpr int channels = 3;
 constexpr int palette_size = 256;

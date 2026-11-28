@@ -1,3 +1,5 @@
+set(cli_version_args "-Dversion=${SI_BUILD_VERSION}" "-Dmusl_sdk=${SI_MUSL_SDK_VERSION}")
+
 add_executable(sdk_smoke sdk_smoke.cpp)
 target_link_libraries(sdk_smoke PRIVATE FFmpeg::FFmpeg LibSixel::LibSixel)
 add_test(NAME sdk.smoke COMMAND sdk_smoke)
@@ -65,6 +67,7 @@ foreach(case IN ITEMS padded short_write midframe_failure flush_failure bad_buff
 endforeach()
 
 add_test(NAME sixel.round_trip COMMAND "${CMAKE_COMMAND}"
+  ${cli_version_args}
   "-Dcase_name=still" "-Dprogram=$<TARGET_FILE:si>" "-Dverify=$<TARGET_FILE:sixel_test>"
   "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/sixel-round-trip"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
@@ -84,6 +87,7 @@ foreach(case IN ITEMS pixel_metrics measured_cells cell_only zero_size one_row c
 endforeach()
 
 add_test(NAME geometry.invalid_cell_override COMMAND "${CMAKE_COMMAND}"
+  ${cli_version_args}
   "-Dcase_name=invalid_cell_override" "-Dprogram=$<TARGET_FILE:si>"
   "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/invalid-cell-override"
   -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
@@ -98,6 +102,7 @@ endforeach()
 add_test(NAME geometry.fit_rotated COMMAND fit_test rotated "${fixtures}/oriented.jpg")
 add_test(NAME geometry.fit_terminal COMMAND sixel_test fit_terminal)
 add_test(NAME geometry.fit_redirected COMMAND "${CMAKE_COMMAND}"
+  ${cli_version_args}
   "-Dcase_name=anamorphic" "-Dprogram=$<TARGET_FILE:si>" "-Dverify=$<TARGET_FILE:sixel_test>"
   "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/fit-redirected" -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
 set_tests_properties(geometry.fit_rotated geometry.fit_terminal geometry.fit_redirected
@@ -121,6 +126,7 @@ add_playback_case(resize once-disposal.gif)
 add_test(NAME playback.invalid_timestamps COMMAND playback_test invalid_timestamps)
 add_test(NAME playback.cancel_before_pending COMMAND playback_test cancel_before_pending)
 add_test(NAME playback.redirected_bytes COMMAND "${CMAKE_COMMAND}"
+  ${cli_version_args}
   "-Dcase_name=playback_gif" "-Dprogram=$<TARGET_FILE:si>" "-Dverify=$<TARGET_FILE:playback_test>"
   "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/playback-redirected" -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
 set_tests_properties(playback.invalid_timestamps playback.cancel_before_pending playback.redirected_bytes
@@ -160,10 +166,11 @@ add_test(NAME sdk.missing
     -P "${CMAKE_CURRENT_SOURCE_DIR}/missing_sdk.cmake")
 set_tests_properties(sdk.missing PROPERTIES LABELS cli)
 
-foreach(case IN ITEMS help no_operand unknown_extra_option unknown_option missing_file
+foreach(case IN ITEMS help version no_operand unknown_extra_option unknown_option missing_file
                       directory spaces unicode end_options)
   add_test(NAME cli.${case}
     COMMAND "${CMAKE_COMMAND}"
+      ${cli_version_args}
       "-Dcase_name=${case}" "-Dprogram=$<TARGET_FILE:si>"
       "-Dverify=$<TARGET_FILE:sixel_test>"
       "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/cli-tests/${case}"
@@ -171,10 +178,13 @@ foreach(case IN ITEMS help no_operand unknown_extra_option unknown_option missin
   set_tests_properties(cli.${case} PROPERTIES LABELS cli)
 endforeach()
 
-add_test(NAME install.help
-  COMMAND "${CMAKE_COMMAND}"
-    -Dcase_name=help "-Dbuild=${PROJECT_BINARY_DIR}" "-Dconfig=$<CONFIG>"
-    "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/install-test"
-    "-Dbindir=${CMAKE_INSTALL_BINDIR}" "-Dexe_suffix=${CMAKE_EXECUTABLE_SUFFIX}"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
-set_tests_properties(install.help PROPERTIES LABELS install)
+foreach(case IN ITEMS help version)
+  add_test(NAME install.${case}
+    COMMAND "${CMAKE_COMMAND}"
+      ${cli_version_args}
+      "-Dcase_name=${case}" "-Dbuild=${PROJECT_BINARY_DIR}" "-Dconfig=$<CONFIG>"
+      "-Dwork=${CMAKE_CURRENT_BINARY_DIR}/install-test/${case}"
+      "-Dbindir=${CMAKE_INSTALL_BINDIR}" "-Dexe_suffix=${CMAKE_EXECUTABLE_SUFFIX}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.cmake")
+  set_tests_properties(install.${case} PROPERTIES LABELS install)
+endforeach()

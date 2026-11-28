@@ -1,4 +1,6 @@
+#include "build_version.hpp"
 #include "gallery.hpp"
+#include "sixel.hpp"
 #include "terminal_playback.hpp"
 
 #include <cerrno>
@@ -21,6 +23,7 @@
 #endif
 
 extern "C" {
+#include <libavutil/avutil.h>
 #include <libavutil/log.h>
 }
 
@@ -30,15 +33,36 @@ constexpr int usage_error = 2;
 constexpr int interrupted_error = 130;
 constexpr auto usage = "Usage: si [--] INPUT...\n"
                        "       si --help\n"
-                       "INPUT can be a file, folder, or wildcard pattern.";
+                       "       si --version\n";
+constexpr auto help = R"(
+View local images and play videos in a SIXEL-capable terminal.
+Each INPUT can be a file, folder, or wildcard pattern.
+
+Options:
+  --help       Show this help.
+  --version    Show the build and component versions.
+  --           Treat the following arguments as paths, even if they start with '-'.
+
+A single video or animated GIF plays silently once. Press Ctrl+C to stop it.
+Folders are scanned one level deep. Batches show previews in two columns.
+Quote patterns you want si to expand. Patterns support *, ?, and bracket sets.
+Set SI_CELL_SIZE=WIDTHxHEIGHT to override the estimated terminal cell size.
+
+Examples:
+  si photo.jpg
+  si photos/
+  si 'photos/*.jpg'
+)";
 
 #ifdef _WIN32
 using Argument = std::wstring_view;
 constexpr Argument help_option = L"--help";
+constexpr Argument version_option = L"--version";
 constexpr Argument end_options = L"--";
 #else
 using Argument = std::string_view;
 constexpr Argument help_option = "--help";
+constexpr Argument version_option = "--version";
 constexpr Argument end_options = "--";
 #endif
 
@@ -71,20 +95,28 @@ std::size_t write_stdout(std::span<const char> data) {
 
 int run(int argc, const Argument::value_type* const* argv) {
   if (argc == 2 && Argument{argv[1]} == help_option) {
-    std::cout << usage << '\n';
+    std::cout << si::banner << "\n\n" << usage << help;
+    return 0;
+  }
+  if (argc == 2 && Argument{argv[1]} == version_option) {
+    std::cout << si::banner << '\n'
+              << "Dyne musl SDK: " << si::musl_sdk_version << '\n'
+              << "FFmpeg: " << av_version_info() << '\n'
+              << "libsixel: " << si::sixel_version() << '\n';
     return 0;
   }
 
+  std::cerr << si::banner << '\n';
   const bool options_ended = argc > 1 && Argument{argv[1]} == end_options;
   const int operand_index = options_ended ? 2 : 1;
   if (argc <= operand_index) {
-    std::cerr << usage << '\n';
+    std::cerr << usage;
     return usage_error;
   }
   for (int i = operand_index; i < argc; ++i) {
     const Argument operand{argv[i]};
     if (operand.empty() || (!options_ended && operand.starts_with('-'))) {
-      std::cerr << usage << '\n';
+      std::cerr << usage;
       return usage_error;
     }
   }
@@ -94,7 +126,7 @@ int run(int argc, const Argument::value_type* const* argv) {
                                        std::optional{si::default_cell_size};
   if (!cell_size) {
     std::cerr << "si: SI_CELL_SIZE must be WIDTHxHEIGHT in positive integer pixels\n"
-              << usage << '\n';
+              << usage;
     return usage_error;
   }
   try {
