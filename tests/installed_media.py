@@ -187,7 +187,8 @@ def verify_gallery(command, work, fixtures):
     require(folder_output[offset:] == b"\n09/08/22 1.5K gallery/poster.png\n\n",
             "expected the last preview with its caption and a blank line")
 
-    mixed = run_si(command, work, str(old), str(poster))
+    # Use the 16 px video and 4 px PNG to isolate layout from JPEG orientation.
+    mixed = run_si(command, work, str(clip), str(poster))
     _, pixels = read_picture(mixed, 0, (328, 16))
     require(pixels[2][321] == BLACK and all(abs(actual - ref) <= 8
             for actual, ref in zip(pixels[14][321], (255, 32, 64))),
