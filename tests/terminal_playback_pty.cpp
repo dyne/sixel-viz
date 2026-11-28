@@ -185,17 +185,27 @@ void check_gallery(PtyProcess& process) {
   const auto right = process.captured.find(dcs, end + 2);
   const auto right_end = process.captured.find(st, right);
   require(right < right_end && right_end != std::string::npos, "missing second SIXEL preview");
+  const auto third = process.captured.find(dcs, right_end + 2);
+  const auto third_end = process.captured.find(st, third);
+  require(third < third_end && third_end != std::string::npos, "missing third SIXEL preview");
   const auto bytes = std::string_view{process.captured};
-  const auto right_position = "\033[41G";
-  require(bytes.substr(end + 2, right - end - 2).ends_with(right_position),
-          "second SIXEL preview did not start in the right column");
-  const auto labels = bytes.substr(right_end + 2);
-  const auto first = labels.find("catalog/left.png");
-  const auto second = labels.find("catalog/right.svg");
-  require(first < second && second < labels.find(shell_after) &&
-          labels.substr(first, second - first).find(right_position) != std::string_view::npos,
-          "expected a label in each column after the previews");
-  std::cout << "PTY previews and captions aligned on the primary screen\n";
+  const auto after_left = bytes.substr(end + 2, right - end - 2);
+  require(after_left.starts_with("\0338\033[2A") &&
+          after_left.find("catalog/left.png") != std::string_view::npos &&
+          after_left.ends_with("\033[29A\033[41G"),
+          "expected the left caption below its preview and the tall preview on the right");
+  const auto after_right = bytes.substr(right_end + 2, third - right_end - 2);
+  // The portrait spans 27 raster rows, the PNG one. Their tile ends are
+  // 26 rows apart, so the third preview can start immediately on the left.
+  require(after_right.starts_with("\0338\033[2A\033[41G") &&
+          after_right.find("catalog/right.svg") != std::string_view::npos &&
+          after_right.ends_with("\0338\r\0337\033[26A"),
+          "expected the next preview in the shorter column without scrolling");
+  const auto after_third = bytes.substr(third_end + 2);
+  require(after_third.starts_with("\0338\033[25A") &&
+          after_third.find("catalog/third.gif") < after_third.find(shell_after),
+          "expected the third caption below its preview and the prompt below the gallery");
+  std::cout << "PTY gallery tiles flow independently with captions below each preview\n";
 }
 
 void check_hold_interrupt(PtyProcess& process) {

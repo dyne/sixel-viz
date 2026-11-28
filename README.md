@@ -62,7 +62,9 @@ symbol. When the timing or seek is unavailable, `si` uses the first frame.
 
 A caption shows the capture date, or the file's modification date, followed
 by its size and a path relative to the current directory. Sizes use B, K, M,
-and G in steps of 1024. A blank line follows each row.
+and G in steps of 1024. In a batch, each caption sits directly below its preview
+with a blank line before the next tile in that column. In the terminal, the
+next preview goes into whichever column ends higher.
 
 ```text
 03/02/01 1.5M photos/cat.jpg
@@ -83,8 +85,9 @@ setting takes whole pixels in `WIDTHxHEIGHT` form.
 During playback, `si` refits the picture when you resize the window and
 restores the shell screen when playback ends. With redirected stdout, a single
 still keeps its native display size and motion writes every frame without
-pacing. Batches use an estimated 80-column grid. Long captions can be shortened
-to fit a terminal column. Redirected captions include the full paths.
+pacing. Redirected batches use rows in an estimated 80-column grid. Long
+captions can be shortened to fit a terminal column. Redirected captions
+include the full paths.
 
 Usage errors exit with status 2. Media or output errors exit with status 1 and
 write a message to stderr. Interrupted playback exits with status 130.
