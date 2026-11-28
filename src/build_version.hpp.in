@@ -1,0 +1,9 @@
+#pragma once
+
+namespace si {
+
+inline constexpr char banner[] =
+    "Sixel-Viz @SI_BUILD_VERSION@ by Jaromil - Copyright (C) 2026 Dyne.org foundation";
+inline constexpr char musl_sdk_version[] = "@SI_MUSL_SDK_VERSION@";
+
+}

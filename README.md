@@ -73,7 +73,10 @@ next preview goes into whichever column ends higher.
 
 Quote paths with spaces. Quote a pattern if you want `si` to expand it.
 Patterns support `*`, `?`, and bracket sets or ranges. Use `--` before a
-filename that starts with a hyphen. Run `si --help` for usage.
+filename that starts with a hyphen. Run `si --help` for options and examples.
+`si --version` shows the build version and the versions of FFmpeg, libsixel
+and the Dyne musl SDK. The startup banner goes to stderr during media runs,
+so redirected stdout carries the SIXEL output.
 
 ### Terminal size and redirected output
 
@@ -113,6 +116,7 @@ bash ci/musl-check.sh "$(mktemp -d)"
 The [script](ci/musl-check.sh) prints its work directory, installs the viewer
 at `stage/bin/si` under that directory, checks that the ELF is statically
 linked, and runs the installed media checks.
+Set `SI_MUSL_SDK_VERSION` to your SDK's tag to include it in local builds.
 
 ## Build and test locally
 
@@ -125,6 +129,12 @@ If pkg-config already finds FFmpeg and libsixel, run these commands from the
 project root. For SDKs installed in custom locations, add
 `-DFFmpeg_ROOT=/path/to/ffmpeg` and `-DLibSixel_ROOT=/path/to/libsixel` to
 the configure command.
+
+Local builds take their version from the latest reachable release tag and
+use `v0.0.0` when building without a tag. Pass
+`-DSI_BUILD_VERSION=vN.N.N` to set it explicitly. Release CI passes the
+selected tag to every build and records the Dyne musl SDK tag in Linux
+packages.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
