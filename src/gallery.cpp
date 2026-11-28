@@ -233,6 +233,13 @@ struct Layout {
 
   bool position_raster() const { return terminal && geometry.cells.height >= 3; }
 
+  std::string_view line_ending() const { return terminal ? "\r\n" : "\n"; }
+
+  int caption_columns(bool right) const {
+    if (right) return geometry.cells.width - right_column;
+    return right_column ? right_column - 1 : geometry.cells.width;
+  }
+
   int image_rows(std::size_t height) const {
     return static_cast<int>((static_cast<std::int64_t>(height) * geometry.cells.height +
                              geometry.pixels.height - 1) / geometry.pixels.height);
@@ -290,9 +297,11 @@ Thumbnail compose_row(const Thumbnail& left, const Thumbnail& right, std::size_t
   const auto height = std::max(left.height, right.height);
   Thumbnail row{std::vector<std::uint8_t>(sixel_rgb_size(width, height)), width, height};
   const auto copy = [&](const Thumbnail& image, std::size_t x) {
+    // A composed raster shares one caption line. Align both bottom edges.
+    const auto top = height - image.height;
     const auto stride = image.width * 3;
     for (std::size_t y = 0; y < image.height; ++y) {
-      std::copy_n(image.rgb.data() + y * stride, stride, row.rgb.data() + (y * width + x) * 3);
+      std::copy_n(image.rgb.data() + y * stride, stride, row.rgb.data() + ((top + y) * width + x) * 3);
     }
   };
   copy(left, 0);
@@ -300,21 +309,35 @@ Thumbnail compose_row(const Thumbnail& left, const Thumbnail& right, std::size_t
   return row;
 }
 
+constexpr std::string_view restore_cursor = "\x1b" "8";
+
+std::string cursor_up(int rows) {
+  return rows > 0 ? "\x1b[" + std::to_string(rows) + "A" : std::string{};
+}
+
+std::string cursor_column(int column) {
+  return "\x1b[" + std::to_string(column + 1) + "G";
+}
+
 void captions(const SixelSink& sink, const Layout& layout, const Entry& left, const Entry* right) {
-  const auto first_width = layout.right_column ? layout.right_column - 1 : layout.geometry.cells.width;
-  const auto left_label = printable(left.label, layout.terminal ? first_width : std::string_view::npos);
+  const auto left_label = printable(left.label,
+      layout.terminal ? layout.caption_columns(false) : std::string_view::npos);
   write_text(sink, left_label.text);
   if (right) {
     if (layout.terminal) {
-      write_text(sink, "\x1b[" + std::to_string(layout.right_column + 1) + "G");
+      write_text(sink, cursor_column(layout.right_column));
     } else {
       const auto column = static_cast<std::size_t>(layout.right_column);
       write_text(sink, std::string(column > left_label.width ? column - left_label.width : 1, ' '));
     }
-    const auto columns = layout.geometry.cells.width - layout.right_column;
-    write_text(sink, printable(right->label, layout.terminal ? columns : std::string_view::npos).text);
+    write_text(sink, printable(right->label,
+        layout.terminal ? layout.caption_columns(true) : std::string_view::npos).text);
   }
-  write_text(sink, layout.terminal ? "\r\n\r\n" : "\n\n");
+  write_text(sink, layout.line_ending());
+}
+
+void end_row(const SixelSink& sink, const Layout& layout) {
+  write_text(sink, layout.line_ending());
   if (!sink.flush()) throw std::runtime_error("could not flush preview text");
 }
 
@@ -323,24 +346,63 @@ struct Tile {
   const Entry& entry;
 };
 
+class GalleryColumns {
+public:
+  bool use(const Layout& layout) {
+    const auto [width, height] = layout.geometry.cells;
+    const auto [pixel_width, pixel_height] = layout.geometry.pixels;
+    const bool positioned = layout.position_raster() && layout.right_column > 0;
+    if (!positioned || width != cells_.width || height != cells_.height ||
+        pixel_width != pixels_.width || pixel_height != pixels_.height) {
+      // Start a new group if the terminal reflows or the column widths change.
+      left_space_ = right_space_ = 0;
+      cells_ = {width, height};
+      pixels_ = {pixel_width, pixel_height};
+    }
+    return positioned;
+  }
+
+  bool next_is_right() const { return right_space_ > left_space_; }
+
+  void present(const SixelSink& sink, const Layout& layout, Tile tile, bool right) {
+    const ConsolePreviewMode mode(true);
+    const int image_rows = layout.image_rows(tile.thumbnail.height);
+    const int tile_rows = image_rows + 2;  // Caption and a blank line.
+    auto& available = right ? right_space_ : left_space_;
+    // Keep the saved cursor below both columns. Extend the terminal only when
+    // the next tile needs more rows than are available above that cursor.
+    const int advance = std::max(0, tile_rows - available);
+    left_space_ += advance;
+    right_space_ += advance;
+    write_text(sink, "\r" + std::string(advance, '\n') + "\x1b" "7");
+    const auto column = right ? cursor_column(layout.right_column) : std::string{};
+    write_text(sink, cursor_up(available) + column);
+    encode_sixel(tile.thumbnail.image(), sink);
+    write_text(sink, restore_cursor);
+    write_text(sink, cursor_up(available - image_rows) + column);
+    write_text(sink, printable(tile.entry.label, layout.caption_columns(right)).text);
+    write_text(sink, restore_cursor);
+    if (!sink.flush()) throw std::runtime_error("could not flush preview text");
+    available -= tile_rows;
+  }
+
+private:
+  Dimensions cells_;
+  Dimensions pixels_;
+  int left_space_ = 0;
+  int right_space_ = 0;
+};
+
 void present(const SixelSink& sink, const Layout& layout, Tile left, std::optional<Tile> right = {}) {
   const ConsolePreviewMode mode(layout.terminal.has_value());
   if (layout.position_raster()) {
-    // Reserve space first so the image and its labels can scroll together.
-    // Restore the caption position regardless of where SIXEL leaves the cursor.
-    const auto height = right ? std::max(left.thumbnail.height, right->thumbnail.height) :
-                                left.thumbnail.height;
-    const auto rows = layout.image_rows(height);
-    const auto up = "\x1b[" + std::to_string(rows) + "A";
+    // Reserve the raster rows before drawing, then restore the cursor just
+    // below them regardless of where the terminal leaves it after SIXEL.
+    const auto rows = layout.image_rows(left.thumbnail.height);
     write_text(sink, "\r" + std::string(rows, '\n') + "\x1b" "7");
-    write_text(sink, up);
+    write_text(sink, cursor_up(rows));
     encode_sixel(left.thumbnail.image(), sink);
-    write_text(sink, "\x1b" "8");
-    if (right) {
-      write_text(sink, up + "\x1b[" + std::to_string(layout.right_column + 1) + "G");
-      encode_sixel(right->thumbnail.image(), sink);
-      write_text(sink, "\x1b" "8");
-    }
+    write_text(sink, restore_cursor);
   } else {
     if (right) {
       const auto row = compose_row(left.thumbnail, right->thumbnail, layout.column_pixels(layout.right_column));
@@ -348,9 +410,10 @@ void present(const SixelSink& sink, const Layout& layout, Tile left, std::option
     } else {
       encode_sixel(left.thumbnail.image(), sink);
     }
-    write_text(sink, layout.terminal ? "\r\n" : "\n");
+    write_text(sink, layout.line_ending());
   }
   captions(sink, layout, left.entry, right ? &right->entry : nullptr);
+  end_row(sink, layout);
 }
 
 void play_motion(MediaDecoder& decoder, DisplayFrame first, DisplayFrame second,
@@ -402,6 +465,7 @@ void display_single(const fs::path& path, const fs::path& cwd, Dimensions cell_s
       } else {
         write_text(sink, "\n");
         captions(sink, layout, entry, nullptr);
+        end_row(sink, layout);
       }
       return;
     }
@@ -452,6 +516,7 @@ int display_gallery(std::span<const fs::path> paths, Dimensions cell_size, const
     return left.path < right.path;
   });
 
+  GalleryColumns columns;
   for (std::size_t index = 0; index < entries.size();) {
     const Layout layout(measure_stdout(cell_size), cell_size, true);
     const auto load = [&](bool right) -> std::optional<Thumbnail> {
@@ -463,6 +528,13 @@ int display_gallery(std::span<const fs::path> paths, Dimensions cell_size, const
         return std::nullopt;
       }
     };
+    if (columns.use(layout)) {
+      const bool right = columns.next_is_right();
+      const auto preview = load(right);
+      const auto& entry = entries[index++];
+      if (preview) columns.present(sink, layout, {*preview, entry}, right);
+      continue;
+    }
     const auto left = load(false);
     const auto& left_entry = entries[index++];
     if (!left) continue;

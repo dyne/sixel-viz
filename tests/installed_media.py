@@ -181,11 +181,17 @@ def verify_gallery(command, work, fixtures):
     old_label = caption(old, "03/02/01", "gallery/old.jpg")
     clip_label = caption(clip, "07/06/15", "gallery/clip.mkv", "1.5K")
     row = b"\n" + old_label.ljust(40) + clip_label + b"\n\n"
-    require(folder_output[offset:].startswith(row),
+    require(folder_output.startswith(row, offset),
             f"incorrect date, order or alignment: {folder_output[offset:offset + 95]!r}")
     offset, _ = read_picture(folder_output, offset + len(row), (8, 4))
     require(folder_output[offset:] == b"\n09/08/22 1.5K gallery/poster.png\n\n",
-            "expected the unpaired image and its relative path on the last row")
+            "expected the last preview with its caption and a blank line")
+
+    mixed = run_si(command, work, str(old), str(poster))
+    _, pixels = read_picture(mixed, 0, (328, 16))
+    require(pixels[2][321] == BLACK and all(abs(actual - ref) <= 8
+            for actual, ref in zip(pixels[14][321], (255, 32, 64))),
+            "expected the shorter preview at the bottom of the composed raster")
 
     single_match = run_si(command, work, "gallery/[o]l?.jpg")
     picture = PICTURE.match(single_match)
