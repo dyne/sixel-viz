@@ -135,6 +135,10 @@ The [native build recipe](ci/native-check.sh) installs into a temporary
 fixtures. GitHub runs it on Apple silicon macOS for pull requests.
 [Pull request workflow](.github/workflows/native.yml)
 
+GitHub Actions keeps a separate ccache for each build target. The macOS
+release and pull request jobs use the same cache key prefix. The local build
+recipes also use ccache when it is on your `PATH`.
+
 <details>
 <summary>Native build commands by platform</summary>
 
