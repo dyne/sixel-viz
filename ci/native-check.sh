@@ -166,12 +166,10 @@ case "$platform" in
 esac
 
 cd "$source_dir"
-app_args=()
 if [[ -n $archive_path && $platform == macos ]]; then
-  app_args+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,-headerpad_max_install_names")
+  cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-Wl,-headerpad_max_install_names")
 fi
 cmake -S . -B "$work/build" "${cmake_args[@]}" \
-  "${app_args[@]}" \
   "-Dxtd_DIR=$(native_path "$work/xtd-sdk/cmake")" \
   "-DFFmpeg_ROOT=${ffmpeg_prefix:+$(native_path "$ffmpeg_prefix")}" \
   "-DLibSixel_ROOT=$(native_path "$work/libsixel-sdk")" -DCMAKE_INSTALL_BINDIR=bin
