@@ -7,9 +7,10 @@ if(toolset)
 endif()
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${build}" ${generator_args}
-    "-DCMAKE_TOOLCHAIN_FILE=${toolchain}" -DCMAKE_DISABLE_FIND_PACKAGE_xtd=TRUE
+    "-DCMAKE_TOOLCHAIN_FILE=${toolchain}" "-DFFmpeg_ROOT=${build}/missing-ffmpeg"
   RESULT_VARIABLE status OUTPUT_VARIABLE output ERROR_VARIABLE error)
 
-if(NOT status MATCHES "^[1-9][0-9]*$" OR NOT error MATCHES "CMAKE_DISABLE_FIND_PACKAGE_xtd")
-  message(FATAL_ERROR "Expected CMake to identify the missing xtd SDK.\n${output}\n${error}")
+if(NOT status MATCHES "^[1-9][0-9]*$" OR
+   NOT error MATCHES "Required FFmpeg development SDK component avformat was not found")
+  message(FATAL_ERROR "Expected CMake to identify the missing FFmpeg SDK.\n${output}\n${error}")
 endif()

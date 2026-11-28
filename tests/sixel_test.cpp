@@ -311,11 +311,18 @@ int main(int argc, char** argv) {
       std::ifstream file(argv[2], std::ios::binary);
       require(file.is_open(), "could not open captured SIXEL output");
       const std::string output{std::istreambuf_iterator<char>{file}, {}};
+      const auto end = output.find("\033\\");
+      require(end != std::string::npos, "missing SIXEL terminator");
+      const auto picture = std::string_view{output}.substr(0, end + 2);
+      const auto caption = std::string_view{output}.substr(end + 2);
+      require(caption.starts_with('\n') && caption.ends_with("\n\n") &&
+              std::count(caption.begin(), caption.end(), '\n') == 3,
+              "expected one caption and a blank line after SIXEL");
       if (kind == "raster_anamorphic") {
-        RasterReader{output, 16, 64, four_bands}.check_picture();
+        RasterReader{picture, 16, 64, four_bands}.check_picture();
         std::cout << "one 7-bit SIXEL picture, 64x16, all 1024 pixels matched\n";
       } else {
-        RasterReader{output}.check_picture();
+        RasterReader{picture}.check_picture();
         std::cout << "one 7-bit SIXEL picture, 8x4, all 32 pixels matched\n";
       }
     } else if (kind == "fit_terminal") {

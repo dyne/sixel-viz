@@ -1,5 +1,5 @@
 add_executable(sdk_smoke sdk_smoke.cpp)
-target_link_libraries(sdk_smoke PRIVATE xtd.core FFmpeg::FFmpeg LibSixel::LibSixel)
+target_link_libraries(sdk_smoke PRIVATE FFmpeg::FFmpeg LibSixel::LibSixel)
 add_test(NAME sdk.smoke COMMAND sdk_smoke)
 set_tests_properties(sdk.smoke PROPERTIES LABELS cli)
 
@@ -140,6 +140,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
   add_pty_case(resize resize-motion.gif)
   add_pty_case(interrupt_hold once-disposal.gif)
   add_pty_case(interrupt_write resize-motion.gif)
+  set(gallery_work "${CMAKE_CURRENT_BINARY_DIR}/gallery-pty")
+  file(MAKE_DIRECTORY "${gallery_work}/catalog")
+  configure_file("${fixtures}/alpha.png" "${gallery_work}/catalog/left.png" COPYONLY)
+  configure_file("${fixtures}/two-colors.svg" "${gallery_work}/catalog/right.svg" COPYONLY)
+  add_test(NAME cli.gallery_pty COMMAND terminal_playback_pty gallery "$<TARGET_FILE:si>" catalog)
+  set_tests_properties(cli.gallery_pty PROPERTIES LABELS cli TIMEOUT 10 WORKING_DIRECTORY "${gallery_work}")
 endif()
 
 add_test(NAME sdk.missing
@@ -153,7 +159,7 @@ add_test(NAME sdk.missing
     -P "${CMAKE_CURRENT_SOURCE_DIR}/missing_sdk.cmake")
 set_tests_properties(sdk.missing PROPERTIES LABELS cli)
 
-foreach(case IN ITEMS help no_operand extra_operands unknown_option missing_file
+foreach(case IN ITEMS help no_operand unknown_extra_option unknown_option missing_file
                       directory spaces unicode end_options)
   add_test(NAME cli.${case}
     COMMAND "${CMAKE_COMMAND}"

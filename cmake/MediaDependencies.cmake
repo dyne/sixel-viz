@@ -1,5 +1,6 @@
 set(FFmpeg_ROOT "" CACHE PATH "FFmpeg development SDK prefix")
 set(LibSixel_ROOT "" CACHE PATH "libsixel development SDK prefix")
+option(SI_USE_GCC_UNWINDER "Use GCC's unwinder for static FFmpeg builds" OFF)
 
 function(import_sdk_library target sdk component header library)
   set(search_args)
@@ -30,6 +31,13 @@ if(PkgConfig_FOUND AND NOT FFmpeg_ROOT)
 endif()
 add_library(FFmpeg::FFmpeg INTERFACE IMPORTED)
 if(TARGET PkgConfig::FFmpeg)
+  if(SI_USE_GCC_UNWINDER)
+    # ARM hard-float C++ exceptions use GCC's EHABI personality routines.
+    # Let the compiler supply their matching unwinder for the whole executable.
+    get_target_property(ffmpeg_libraries PkgConfig::FFmpeg INTERFACE_LINK_LIBRARIES)
+    list(FILTER ffmpeg_libraries EXCLUDE REGEX "(^|/)libunwind[.]a$|^unwind$")
+    set_property(TARGET PkgConfig::FFmpeg PROPERTY INTERFACE_LINK_LIBRARIES "${ffmpeg_libraries}")
+  endif()
   target_link_libraries(FFmpeg::FFmpeg INTERFACE PkgConfig::FFmpeg)
 else()
   import_sdk_library(FFmpeg::avformat FFmpeg avformat libavformat/avformat.h avformat)

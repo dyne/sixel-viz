@@ -93,16 +93,21 @@ public:
     require(write(master_, "\003", 1) == 1, "could not type Ctrl+C");
   }
 
-  void expect_return(int code, std::chrono::milliseconds budget) {
+  void expect_return(int code, std::chrono::milliseconds budget, bool playback = true) {
     const auto prompt = read_through(std::string{shell_after} + std::to_string(code), 0, budget);
     const auto entered = captured.find(start_screen);
     const auto left = captured.find(end_screen);
-    require(captured.find(shell_before) < entered && entered < left && left < prompt,
-            "shell text must surround one alternate-screen session");
-    require(captured.find(start_screen, entered + 1) == std::string::npos &&
-            captured.find(end_screen, left + 1) == std::string::npos,
-            "alternate screen entered or left more than once");
-    require(captured.find("si: ") == std::string::npos, "CLI emitted a playback error diagnostic");
+    if (playback) {
+      require(captured.find(shell_before) < entered && entered < left && left < prompt,
+              "shell text must surround one alternate-screen session");
+      require(captured.find(start_screen, entered + 1) == std::string::npos &&
+              captured.find(end_screen, left + 1) == std::string::npos,
+              "alternate screen entered or left more than once");
+    } else {
+      require(captured.find(shell_before) < prompt && entered == std::string::npos &&
+              left == std::string::npos, "gallery needs to stay on the primary screen");
+    }
+    require(captured.find("si: ") == std::string::npos, "CLI emitted an error diagnostic");
     int status = 0;
     pid_t exited;
     do {
@@ -159,8 +164,38 @@ void check_resize(PtyProcess& process) {
   next = expect_picture(process, next, 400, 250, false, 5000ms);
   next = expect_picture(process, next, 400, 250, false, 1500ms);
   process.expect_return(0, 1500ms);
-  require(process.captured.find(dcs, next) == std::string::npos, "unexpected extra frames");
+  const auto left = process.captured.find(end_screen);
+  const auto still = process.captured.find(dcs, next);
+  require(left < still && still < process.captured.find(shell_after), "expected a still after playback");
+  const auto end = process.captured.find(st, still);
+  require(end != std::string::npos, "expected a complete still after playback");
+  const auto caption = std::string_view{process.captured}.substr(end + 2);
+  require(caption.starts_with("\0338") && caption.size() > 10 &&
+          caption[4] == '/' && caption[7] == '/' &&
+          process.captured.find(dcs, still + 2) == std::string::npos,
+          "expected one final still and caption on the primary screen");
   std::cout << "PTY frames 480x300, 272x170, 400x250, 400x250, 400x250; shell returned 0\n";
+}
+
+void check_gallery(PtyProcess& process) {
+  process.expect_return(0, 2500ms, false);
+  const auto start = process.captured.find(dcs);
+  const auto end = process.captured.find(st, start);
+  require(start < end && end != std::string::npos, "missing first SIXEL preview");
+  const auto right = process.captured.find(dcs, end + 2);
+  const auto right_end = process.captured.find(st, right);
+  require(right < right_end && right_end != std::string::npos, "missing second SIXEL preview");
+  const auto bytes = std::string_view{process.captured};
+  const auto right_position = "\033[41G";
+  require(bytes.substr(end + 2, right - end - 2).ends_with(right_position),
+          "second SIXEL preview did not start in the right column");
+  const auto labels = bytes.substr(right_end + 2);
+  const auto first = labels.find("catalog/left.png");
+  const auto second = labels.find("catalog/right.svg");
+  require(first < second && second < labels.find(shell_after) &&
+          labels.substr(first, second - first).find(right_position) != std::string_view::npos,
+          "expected a label in each column after the previews");
+  std::cout << "PTY previews and captions aligned on the primary screen\n";
 }
 
 void check_hold_interrupt(PtyProcess& process) {
@@ -199,6 +234,7 @@ int main(int argc, char** argv) {
     PtyProcess process{argv[2], argv[3]};
     const std::string_view test = argv[1];
     if (test == "resize") check_resize(process);
+    else if (test == "gallery") check_gallery(process);
     else if (test == "interrupt_hold") check_hold_interrupt(process);
     else if (test == "interrupt_write") check_write_interrupt(process);
     else return 2;

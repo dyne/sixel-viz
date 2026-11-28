@@ -1,11 +1,15 @@
 """Check redirected SIXEL output from a freshly installed si."""
 
 import argparse
+from datetime import datetime
+import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
+import zlib
 
 
 PICTURE = re.compile(rb'\x1bP[0-9;]*q"(\d+);(\d+);(\d+);(\d+)([^\x1b]*)\x1b\\')
@@ -63,16 +67,35 @@ def read_picture(output, offset, size):
     return picture.end(), pixels
 
 
-def verify_file(command, work, fixture, size, frames, tolerance=8):
-    name = "夜空 café 🌌" + fixture.suffix
-    shutil.copyfile(fixture, work / name)
-    result = subprocess.run([*command, name], cwd=work, capture_output=True, timeout=30)
+def set_modified(path, year, month, day):
+    timestamp = datetime(year, month, day, 12).timestamp()
+    os.utime(path, (timestamp, timestamp))
+
+
+def caption(path, date, display_name, size=None):
+    size = size if size is not None else f"{path.stat().st_size}B"
+    return f"{date} {size} {display_name}".encode()
+
+
+def run_si(command, work, *operands):
+    env = dict(os.environ, SI_CELL_SIZE="8x16")
+    result = subprocess.run([*command, *operands], cwd=work, capture_output=True,
+                            timeout=30, env=env)
     require(result.returncode == 0 and not result.stderr,
             f"exited {result.returncode}, stderr: {result.stderr!r}")
+    return result.stdout
+
+
+def verify_file(command, work, fixture, size, frames, tolerance=8):
+    name = "夜空 café 🌌" + fixture.suffix
+    path = work / name
+    shutil.copyfile(fixture, path)
+    set_modified(path, 2020, 1, 2)
+    output = run_si(command, work, name)
     offset = 0
     for index, samples in enumerate(frames, start=1):
         try:
-            offset, pixels = read_picture(result.stdout, offset, size)
+            offset, pixels = read_picture(output, offset, size)
             for x, y, expected in samples:
                 actual = pixels[y][x]
                 require(all(abs(value - reference) <= tolerance
@@ -80,9 +103,95 @@ def verify_file(command, work, fixture, size, frames, tolerance=8):
                         f"RGB at ({x}, {y}) is {actual}, expected {expected} ± {tolerance}")
         except ValueError as failure:
             raise ValueError(f"picture {index}: {failure}") from failure
-    require(offset == len(result.stdout),
-            f"unexpected output after {len(frames)} pictures at byte {offset}")
+    suffix = b"" if fixture.suffix == ".mkv" else b"\n" + caption(path, "02/01/20", name) + b"\n\n"
+    require(output[offset:] == suffix,
+            f"unexpected output after {len(frames)} pictures at byte {offset}: {output[offset:offset + 90]!r}")
     print(f"{fixture.name}: {len(frames)} complete {size[0]}x{size[1]} pictures, RGB samples matched")
+
+
+def exif_profile(order="<", date=b"2001:02:03 04:05:06\0"):
+    endian = b"II" if order == "<" else b"MM"
+    # TIFF header, IFD0 with its EXIF pointer, then the DateTimeOriginal IFD.
+    return (endian + struct.pack(order + "HIH", 42, 8, 1)
+            + struct.pack(order + "HHII", 0x8769, 4, 1, 26) + bytes(4)
+            + struct.pack(order + "H", 1)
+            + struct.pack(order + "HHII", 0x9003, 2, len(date), 44) + bytes(4) + date)
+
+
+def jpeg_with_exif(jpeg):
+    exif = b"Exif\0\0" + exif_profile()
+    return jpeg[:2] + b"\xff\xe1" + struct.pack(">H", len(exif) + 2) + exif + jpeg[2:]
+
+
+def verify_image_metadata(command, work, fixtures):
+    png = (fixtures / "alpha.png").read_bytes()
+    webp = (fixtures / "two-colors.webp").read_bytes()
+    profile = exif_profile(">")
+
+    def png_with_exif(profile):
+        chunk = b"eXIf" + profile
+        return png[:33] + struct.pack(">I", len(profile)) + chunk + struct.pack(">I", zlib.crc32(chunk)) + png[33:]
+
+    def riff_chunk(tag, payload):
+        return tag + struct.pack("<I", len(payload)) + payload + bytes(len(payload) % 2)
+
+    # VP8X declares EXIF and the 8x4 canvas of the fixture's VP8L bitstream.
+    riff = b"WEBP" + riff_chunk(b"VP8X", bytes([8, 0, 0, 0, 7, 0, 0, 3, 0, 0]))
+    riff += webp[12:] + riff_chunk(b"EXIF", b"Exif\0\0" + exif_profile())
+    cases = (
+        ("capture.png", png_with_exif(profile), "03/02/01"),
+        ("capture.webp", riff_chunk(b"RIFF", riff), "03/02/01"),
+        ("invalid-date.png", png_with_exif(exif_profile(date=b"2001:02:99 04:05:06\0")), "02/01/20"),
+    )
+    for name, contents, date in cases:
+        path = work / name
+        path.write_bytes(contents)
+        set_modified(path, 2020, 1, 2)
+        output = run_si(command, work, name)
+        end, _ = read_picture(output, 0, (8, 4))
+        require(output[end:] == b"\n" + caption(path, date, name) + b"\n\n",
+                f"incorrect capture date for {name}: {output[end:]!r}")
+    print("Image metadata: PNG and WebP EXIF dates and invalid-date fallback matched")
+
+
+def verify_gallery(command, work, fixtures):
+    folder = work / "gallery"
+    folder.mkdir()
+    old, clip, poster = (folder / name for name in ("old.jpg", "clip.mkv", "poster.png"))
+    old.write_bytes(jpeg_with_exif((fixtures / "oriented.jpg").read_bytes()))
+    shutil.copyfile(fixtures / "limited-yuv.mkv", clip)
+    poster.write_bytes((fixtures / "alpha.png").read_bytes().ljust(1536, b"\0"))
+    (folder / "notes.txt").write_text("skip me")
+    (folder / "nested").mkdir()
+    shutil.copyfile(poster, folder / "nested" / "outside.png")
+    set_modified(old, 2030, 4, 5)
+    set_modified(clip, 2015, 6, 7)
+    set_modified(poster, 2022, 8, 9)
+
+    folder_output = run_si(command, work, "gallery")
+    folder_glob = run_si(command, work, "galler?/*.*")
+    explicit = run_si(command, work, str(poster), str(clip), str(old))
+    require(folder_output == folder_glob == explicit, "batch input forms did not agree")
+    offset, pixels = read_picture(folder_output, 0, (384, 16))
+    # The second video frame is the first frame at or after 10% of the clip.
+    expected_pixels = [(320 + 48, 4, GREEN), (320 + 29, 7, WHITE), (310, 7, BLACK)]
+    for x, y, expected in expected_pixels:
+        require(all(abs(actual - ref) <= 12 for actual, ref in zip(pixels[y][x], expected)),
+                f"preview pixel ({x}, {y}) was {pixels[y][x]}, expected {expected}")
+    old_label = caption(old, "03/02/01", "gallery/old.jpg")
+    clip_label = caption(clip, "07/06/15", "gallery/clip.mkv", "1.5K")
+    row = b"\n" + old_label.ljust(40) + clip_label + b"\n\n"
+    require(folder_output[offset:].startswith(row),
+            f"incorrect date, order or alignment: {folder_output[offset:offset + 95]!r}")
+    offset, _ = read_picture(folder_output, offset + len(row), (8, 4))
+    require(folder_output[offset:] == b"\n09/08/22 1.5K gallery/poster.png\n\n",
+            "expected the unpaired image and its relative path on the last row")
+
+    single_match = run_si(command, work, "gallery/[o]l?.jpg")
+    picture = PICTURE.match(single_match)
+    require(picture and single_match[picture.end():] == b"\n" + old_label + b"\n\n",
+            "one-match wildcard did not select the expected image")
+    print("Gallery: folder, wildcards, multiple paths, sorting, captions, and video preview matched")
 
 
 def main():
@@ -115,13 +224,22 @@ def main():
     with tempfile.TemporaryDirectory(prefix="si-installed-", dir=root) as directory:
         work = Path(directory)
         print(f"Program: {program}\nWorking directory: {work}", flush=True)
+        fixtures = tests / "fixtures"
         for name, size, frames, tolerance in cases:
             try:
-                verify_file(command, work, tests / "fixtures" / name, size, frames, tolerance)
+                verify_file(command, work, fixtures / name, size, frames, tolerance)
             except (OSError, subprocess.TimeoutExpired, ValueError) as failure:
                 print(f"{name}: {failure}")
                 failed += 1
-    print(f"{len(cases) - failed}/{len(cases)} installed media checks passed")
+        extra_checks = (verify_image_metadata, verify_gallery)
+        for verify in extra_checks:
+            try:
+                verify(command, work, fixtures)
+            except (OSError, subprocess.TimeoutExpired, ValueError) as failure:
+                print(f"{verify.__name__}: {failure}")
+                failed += 1
+    total = len(cases) + len(extra_checks)
+    print(f"{total - failed}/{total} installed media checks passed")
     return bool(failed)
 
 
