@@ -2,6 +2,34 @@
 
 `si` is a command-line SIXEL image viewer and silent video player.
 
+## Install the latest release
+
+On Linux and Apple silicon macOS, run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dyne/sixel-viz/main/install.sh | bash
+```
+
+This installs `si` in `~/.local/bin` without root access. Add that directory
+to your `PATH` or run `~/.local/bin/si` directly. Set `SI_PREFIX` for another
+install prefix. Rerun the command to update.
+
+On x86-64 Windows, use PowerShell:
+
+```powershell
+$installer = Join-Path $env:TEMP 'sixel-viz-install.ps1'
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/dyne/sixel-viz/main/install.ps1 -OutFile $installer
+powershell -NoProfile -ExecutionPolicy Bypass -File $installer
+```
+
+The Windows installer prints the full path to `si.exe` under
+`%LOCALAPPDATA%\sixel-viz`. Run it with `& 'full\path\to\si.exe'`.
+Both installers verify the archive's SHA-256 and keep bundled libraries
+with the executable. The [release downloads](https://github.com/dyne/sixel-viz/releases/latest)
+also support manual installation.
+
+## Usage
+
 `si --help` prints usage. `si [--] FILE` takes one local file. Use `--` before
 a filename that starts with a hyphen. Quote filenames containing spaces.
 A still writes one complete SIXEL picture to stdout, including when redirected.
