@@ -98,11 +98,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install QEMU user emulators
-        if: matrix.sdk != 'x86_64'
+      - name: Install compiler cache and test tools
+        shell: bash
+        env:
+          SDK_ARCH: ${{ matrix.sdk }}
         run: |
+          packages=(ccache)
+          if [[ $SDK_ARCH != x86_64 ]]; then
+            packages+=(qemu-user)
+          fi
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-user
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
 
       - uses: dyne/musl-action@fe1d1871b096824ddb7aa158f68dd63dabdc9586
         id: musl
@@ -111,6 +117,10 @@ jobs:
           version: v2.11.0
           sha256: ${{ matrix.sha256 }}
 
+      - uses: ./.github/actions/ccache
+        with:
+          target: linux-${{ matrix.arch }}-${{ steps.musl.outputs.sha256 }}
+
       - name: Build, test, and package the installed static viewer
         shell: bash
         env:
@@ -118,7 +128,15 @@ jobs:
           CXX: ${{ steps.musl.outputs.CXX }}
           SI_BUILD_JOBS: 4
           ASSET: si-linux-${{ matrix.arch }}.tar.gz
-        run: bash ci/musl-check.sh "$RUNNER_TEMP" "$RUNNER_TEMP/$ASSET"
+        run: |
+          # Keep the SDK's compiler, sysroot, and header paths stable across jobs.
+          sdk=$(dirname "$(dirname "$(dirname "$CC")")")
+          stable_sdk="$RUNNER_TEMP/sixel-viz-musl-sdk"
+          mv -T -- "$sdk" "$stable_sdk"
+          export CC="$stable_sdk/gcc-musl/bin/${CC##*/}"
+          export CXX="$stable_sdk/gcc-musl/bin/${CXX##*/}"
+          export PATH="$stable_sdk/gcc-musl/bin:$PATH"
+          bash ci/musl-check.sh "$RUNNER_TEMP" "$RUNNER_TEMP/$ASSET"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -139,7 +157,11 @@ jobs:
           persist-credentials: false
 
       - name: Install macOS build tools and SVG provider
-        run: brew install jpeg-xl librsvg ninja pkgconf
+        run: brew install ccache jpeg-xl librsvg ninja pkgconf
+
+      - uses: ./.github/actions/ccache
+        with:
+          target: macos-arm64
 
       - name: Build, test, and package the installed viewer
         run: bash ci/native-check.sh macos "$RUNNER_TEMP" "$RUNNER_TEMP/si-macos-arm64.tar.gz"
@@ -169,12 +191,17 @@ jobs:
           update: true
           install: >-
             git make
+            mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ffmpeg
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-python
+
+      - uses: ./.github/actions/ccache
+        with:
+          target: windows-ucrt64-x86_64
 
       - name: Build, test, and package the installed viewer
         shell: msys2 {0}

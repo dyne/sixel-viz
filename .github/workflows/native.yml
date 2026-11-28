@@ -16,7 +16,11 @@ jobs:
           persist-credentials: false
 
       - name: Install macOS build tools and SVG provider
-        run: brew install jpeg-xl librsvg ninja pkgconf
+        run: brew install ccache jpeg-xl librsvg ninja pkgconf
+
+      - uses: ./.github/actions/ccache
+        with:
+          target: macos-arm64
 
       - name: Build, run all tests, and check installed media
         run: bash ci/native-check.sh macos "$RUNNER_TEMP"

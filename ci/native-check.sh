@@ -40,8 +40,21 @@ if [[ $root == "$source_dir" || $root == "$source_dir/"* ]]; then
   printf 'WORK_ROOT must be outside the source tree.\n' >&2
   exit 2
 fi
-work=$(mktemp -d "$root/si-native.XXXXXX")
+if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+  work=$root/si-native
+  mkdir -- "$work"
+else
+  work=$(mktemp -d "$root/si-native.XXXXXX")
+fi
 printf 'Work directory: %s\n' "$work"
+
+cmake_args=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
+sixel_cc=${CC:-gcc}
+if command -v ccache >/dev/null; then
+  cmake_args+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  sixel_cc="ccache $sixel_cc"
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then ccache --zero-stats; fi
+fi
 
 native_path() {
   if [[ $platform == windows ]]; then
@@ -116,11 +129,17 @@ if [[ $platform == macos ]]; then
     config_log=ffmpeg-config.log
     status=0
     # FFmpeg 7.1.5 includes librsvg-2.0/librsvg/rsvg.h from the parent include directory.
-    "../$release/configure" --prefix="$ffmpeg_prefix" \
-      --pkg-config="$pkg_config" --extra-cflags="-I$svg_prefix/include" --logfile="$config_log" \
-      --disable-autodetect --enable-librsvg --enable-libjxl --enable-zlib \
-      --enable-shared --disable-static --disable-debug --disable-doc --disable-programs \
-      --disable-encoders --disable-muxers --disable-avdevice --disable-avfilter --disable-postproc ||
+    ffmpeg_args=(
+      "--prefix=$ffmpeg_prefix"
+      "--pkg-config=$pkg_config" "--extra-cflags=-I$svg_prefix/include" "--logfile=$config_log"
+      --disable-autodetect --enable-librsvg --enable-libjxl --enable-zlib
+      --enable-shared --disable-static --disable-debug --disable-doc --disable-programs
+      --disable-encoders --disable-muxers --disable-avdevice --disable-avfilter --disable-postproc
+    )
+    if command -v ccache >/dev/null; then
+      ffmpeg_args+=("--cc=ccache ${CC:-gcc}" "--cxx=ccache ${CXX:-g++}")
+    fi
+    "../$release/configure" "${ffmpeg_args[@]}" ||
       status=$?
     if ((status != 0)); then
       if [[ -r $config_log ]]; then
@@ -134,16 +153,11 @@ if [[ $platform == macos ]]; then
   )
 fi
 
-cmake_args=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
-if command -v ccache >/dev/null; then
-  cmake_args+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
-fi
-
 checkout_sdk https://github.com/saitoha/libsixel.git 72ed7d6b4a2252a6245567908c32c4e8e8c226ea "$work/libsixel"
 mkdir "$work/libsixel-build"
 (
   cd "$work/libsixel-build"
-  CFLAGS="-O2 -std=gnu17" "$work/libsixel/configure" --prefix="$work/libsixel-sdk" \
+  CC="$sixel_cc" CFLAGS="-O2 -std=gnu17" "$work/libsixel/configure" --prefix="$work/libsixel-sdk" \
     --disable-img2sixel --disable-sixel2png --disable-python --disable-static \
     --without-libcurl --without-jpeg --without-png
   make -j "$jobs"
@@ -164,6 +178,9 @@ cmake -S . -B "$work/build" "${cmake_args[@]}" \
   "-DFFmpeg_ROOT=${ffmpeg_prefix:+$(native_path "$ffmpeg_prefix")}" \
   "-DLibSixel_ROOT=$(native_path "$work/libsixel-sdk")" -DCMAKE_INSTALL_BINDIR=bin
 cmake --build "$work/build" --config Release --parallel "$jobs"
+if [[ ${GITHUB_ACTIONS:-} == true ]] && command -v ccache >/dev/null; then
+  ccache --show-stats
+fi
 ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
 ctest --test-dir "$work/build" -C Release -V --no-tests=error -R '^sdk\.(smoke|decode\.)'
 cmake --install "$work/build" --config Release --prefix "$work/stage"

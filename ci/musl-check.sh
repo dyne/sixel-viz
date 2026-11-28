@@ -3,7 +3,12 @@ set -euo pipefail
 
 root=${1:?Pass an external work directory}
 asset=${2:-}
-work=$(mktemp -d "$root/si-musl.XXXXXX")
+if [[ ${GITHUB_ACTIONS:-} == true ]]; then
+  work=$root/si-musl
+  mkdir -- "$work"
+else
+  work=$(mktemp -d "$root/si-musl.XXXXXX")
+fi
 source_dir=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 jobs=${SI_BUILD_JOBS:-2}
 : "${CC:?Use the dyne/musl-action CC output}"
@@ -68,8 +73,11 @@ toolchain=(
   -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
   -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
 )
+sixel_cc=$CC
 if command -v ccache >/dev/null; then
   toolchain+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  sixel_cc="ccache $CC"
+  if [[ ${GITHUB_ACTIONS:-} == true ]]; then ccache --zero-stats; fi
 fi
 
 checkout_sdk() {
@@ -87,7 +95,7 @@ mkdir "$work/libsixel-build"
   # The SDK's musl returns non-null for malloc(0) and realloc(NULL, 0).
   # Autoconf otherwise guesses no for these target runtime probes when crossing.
   ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes \
-  CFLAGS="-O2 -I$target/include" LDFLAGS="$static_link_flags" \
+  CC="$sixel_cc" CFLAGS="-O2 -I$target/include" LDFLAGS="$static_link_flags" \
     "$work/libsixel/configure" --build="$(sh "$work/libsixel/config.guess")" --host="$triple" \
     --prefix="$sixel_sdk" --disable-shared --enable-static \
     --disable-img2sixel --disable-sixel2png --disable-python --without-libcurl --without-jpeg --without-png
@@ -103,6 +111,9 @@ cmake -S "$source_dir" -B "$work/build" "${toolchain[@]}" -DPKG_CONFIG_ARGN=--st
   "-DCMAKE_EXE_LINKER_FLAGS=$static_link_flags -Wl,--eh-frame-hdr" \
   "-DCMAKE_FIND_ROOT_PATH=$sixel_sdk;$target;$sysroot"
 cmake --build "$work/build" --parallel "$jobs"
+if [[ ${GITHUB_ACTIONS:-} == true ]] && command -v ccache >/dev/null; then
+  ccache --show-stats
+fi
 if ((${#runner[@]} == 0)); then
   # The missing-SDK case runs its own CMake compiler check.
   LDFLAGS="$static_link_flags" ctest --test-dir "$work/build" -C Release --output-on-failure --no-tests=error
